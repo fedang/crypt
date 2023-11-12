@@ -524,25 +524,26 @@ cmd_maybe_show() {
 
 cmd_help() {
 	cat <<-EOF
-	Usage:
-		$PROGRAM init gpg-id...
+		Usage:
+		    $PROGRAM init gpg-id...
 
-		$PROGRAM [subfolder]
+		    $PROGRAM [subfolder]
 
-		$PROGRAM [show] file
+		    $PROGRAM [show] file
 
-		$PROGRAM add file
+		    $PROGRAM add file
 
-		$PROGRAM edit file
+		    $PROGRAM edit file
 
-		$PROGRAM info
+		    $PROGRAM info
 
-		$PROGRAM git git-args...
+		    $PROGRAM git git-args...
 
-		$PROGRAM help
-			Show this text
-		$PROGRAM version
-			Show version information
+		    $PROGRAM help
+		        Show this text
+
+		    $PROGRAM version
+		        Show version information
 	EOF
 }
 
