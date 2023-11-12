@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#
+# Copy to /usr/bin/crypt
 
 umask 077
 set -o pipefail
