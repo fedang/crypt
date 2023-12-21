@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-#
-# Copy to /usr/bin/crypt
 
 umask 077
 set -o pipefail
 
-GPG_OPTS=( $CRYPT_GPG_OPTS "--quiet" "--yes" "--compress-algo=none" "--no-encrypt-to" )
-GPG="gpg"
-export GPG_TTY="${GPG_TTY:-$(tty 2>/dev/null)}"
-command -v gpg2 &>/dev/null && GPG="gpg2"
-[[ -n $GPG_AGENT_INFO || $GPG == "gpg2" ]] && GPG_OPTS+=( "--batch" "--use-agent" )
+CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 
-LOCATION="${CRYPT_LOCATION:-$HOME/.crypt}"
+declare -A colors=(
+	["bold"]="$(tput bold)"
+	["reset"]="$(tput sgr0)"
+	["black"]="$(tput setaf 0)"
+	["red"]="$(tput setaf 1)"
+	["green"]="$(tput setaf 2)"
+	["yellow"]="$(tput setaf 3)"
+	["blue"]="$(tput setaf 4)"
+	["magenta"]="$(tput setaf 5)"
+	["cyan"]="$(tput setaf 6)"
+	["white"]="$(tput setaf 7)"
+	["gray"]="$(tput setaf 8)"
+)
 
-unset GIT_DIR GIT_WORK_TREE GIT_NAMESPACE GIT_INDEX_FILE GIT_INDEX_VERSION GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
-export GIT_CEILING_DIRECTORIES="$LOCATION/.."
+get_color() {
+	IFS=',' read -ra arr <<< "$@"
+	for c in "${arr[@]}"; do
+		printf "%s" "${colors[$c]}"
+	done
+}
 
 error() {
 	echo "$@" >&2
@@ -23,14 +33,18 @@ error() {
 
 confirm() {
 	[[ -t 0 ]] || return 0
-	local inp
-	read -r -p "$1 [y/N] " inp
-	[[ $inp == [yY] ]] || exit 1
+	local ans
+	read -r -p "$1 [y/N] " ans
+	[[ $ans == [yY] ]] || exit 1
 }
+
+# GIT HANDLING
+unset GIT_DIR GIT_WORK_TREE GIT_NAMESPACE GIT_INDEX_FILE GIT_INDEX_VERSION GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+export GIT_CEILING_DIRECTORIES="$CRYPT_PATH/.."
 
 git_prep() {
 	INNER_GIT_DIR="${1%/*}"
-	while [[ ! -d $INNER_GIT_DIR && ${INNER_GIT_DIR%/*}/ == "${LOCATION%/}/"* ]]; do
+	while [[ ! -d $INNER_GIT_DIR && ${INNER_GIT_DIR%/*}/ == "${CRYPT_PATH%/}/"* ]]; do
 		INNER_GIT_DIR="${INNER_GIT_DIR%/*}"
 	done
 
@@ -54,26 +68,26 @@ git_commit() {
 }
 
 git_init() {
-	INNER_GIT_DIR="$LOCATION"
+	INNER_GIT_DIR="$CRYPT_PATH"
 	git -C "$INNER_GIT_DIR" init || exit 1
-	git_track "$LOCATION" "Add current contents."
+	git_track "$CRYPT_PATH" "Add current contents."
 
-	touch "$LOCATION/.info"
-	git_track '.info' "Add .info file."
-
-	cat <<-EOF > "$LOCATION/.ignore"
-	.git*
-	.info
-	.ignore
-	EOF
-	git_track '.ignore' "Add .ignore file."
-
-	echo '*.gpg diff=gpg' > "$LOCATION/.gitattributes"
+	echo '*.gpg diff=gpg' > "$CRYPT_PATH/.gitattributes"
 	git_track '.gitattributes' "Configure git for gpg file diff."
+
+	touch "$CRYPT_PATH/.entries"
+	git_track '.entries' "Add .entries file."
 
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.binary true
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.textconv "$GPG -d ${GPG_OPTS[*]}"
 }
+
+# ENCRYPTION
+GPG_OPTS=( $CRYPT_GPG_OPTS "--quiet" "--yes" "--compress-algo=none" "--no-encrypt-to" )
+GPG="gpg"
+export GPG_TTY="${GPG_TTY:-$(tty 2>/dev/null)}"
+command -v gpg2 &>/dev/null && GPG="gpg2"
+[[ -n $GPG_AGENT_INFO || $GPG == "gpg2" ]] && GPG_OPTS+=( "--batch" "--use-agent" )
 
 gpg_recipients() {
 	GPG_RECIPIENT_ARGS=( )
@@ -87,8 +101,8 @@ gpg_recipients() {
 		return
 	fi
 
-	local current="$LOCATION/$1"
-	while [[ $current != "$LOCATION" && ! -f $current/.gpg-id ]]; do
+	local current="$CRYPT_PATH/$1"
+	while [[ $current != "$CRYPT_PATH" && ! -f $current/.gpg-id ]]; do
 		current="${current%/*}"
 	done
 	current="$current/.gpg-id"
@@ -147,9 +161,9 @@ reencrypt_path() {
 	while read -r -d "" file; do
 		[[ -L $file ]] && continue
 		local file_dir="${file%/*}"
-		file_dir="${file_dir#$LOCATION}"
+		file_dir="${file_dir#$CRYPT_PATH}"
 		file_dir="${file_dir#/}"
-		local file_display="${file#$LOCATION/}"
+		local file_display="${file#$CRYPT_PATH/}"
 		file_display="${file_display%.gpg}"
 		local file_temp="${file}.tmp.${RANDOM}.${RANDOM}.${RANDOM}.${RANDOM}.--"
 
@@ -174,102 +188,158 @@ reencrypt_path() {
 	done < <(find "$1" -path '*/.git' -prune -o -name '*.extensions' -prune -o -iname '*.gpg' -print0)
 }
 
-confirm_kind() {
-	[[ $1 == *.pass || $1 == *.otp || $1 == *.txt ]] && echo "$1" && return
+# ENTRIES
 
-	for kind in "pass" "otp" "txt"; do
-		[[ -f "$LOCATION/$1.$kind.gpg" ]] && echo "$1.$kind" && return
-	done
+# Data for each entry
+# - glob
+# - name
+# - insert action
+# - show action
+# - edit action
+# - color
+entries_glob=()
+entries_name=()
+entries_insert=()
+entries_show=()
+entries_edit=()
+entries_color=()
 
-	local inp kind=""
-	while true; do
-		read -r -p $'Select which kind of entry you want.\n1) pass\n2) otp\n3) txt\n' inp
-		case "$inp" in
-			pass|pas|password|1) kind='pass'; break ;;
-			otp|2fa|2) 			 kind='otp';  break ;;
-			text|txt|3) 		 kind='txt';  break ;;
+# DEFAULT TYPE == UNKNOWN
+entries_glob+=( "@unknown" )
+entries_name+=( "unknown" )
+entries_insert+=( "none" )
+entries_show+=( "none" )
+entries_edit+=( "none" )
+entries_color+=( "gray" )
+
+# SPECIAL TYPE == PLAIN
+entries_glob+=( "@unencrypted" )
+entries_name+=( "unencrypted !" )
+entries_insert+=( "none" )
+entries_show+=( "none" )
+entries_edit+=( "none" )
+entries_color+=( "white,bold" )
+
+# SPECIAL TYPE == DIRECTORY
+entries_glob+=( "@directory" )
+entries_name+=( "" )
+entries_insert+=( "none" )
+entries_show+=( "none" )
+entries_edit+=( "none" )
+entries_color+=( "blue,bold" )
+
+function none() {
+	echo "$(get_color red,bold)No action specified$(get_color reset)"
+}
+
+entry_load() {
+	while IFS= read -r line; do
+		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
+		declare -A opts=(
+			["name"]="none"
+			["edit_action"]="none"
+			["insert_action"]="none"
+			["show_action"]="none"
+			["color"]="none"
+		)
+
+		for w in "${arr[@]:1}"; do
+			IFS='=' read -r k v <<< "$w"
+			opts["$k"]="${v:-none}"
+			[[ "${opts[$k]}" == $'"'* ]] && opts["$k"]="${opts[$k]:1:-1}" # Strip quotes
+		done
+
+		local i
+		case "${arr[0]}" in
+			\@unknown) i=0 ;;
+			\@unencrypted) i=1 ;;
+			\@directory) i=2 ;;
+			*) i="${#entries_glob[@]}" ;;
 		esac
-	done
-	echo "$1.$kind"
+
+		entries_glob[$i]="${arr[0]}"
+		entries_name[$i]="${opts[name]}"
+		entries_insert[$i]="${opts[insert_action]}"
+		entries_show[$i]="${opts[show_action]}"
+		entries_edit[$i]="${opts[edit_action]}"
+		entries_color[$i]="${opts[color]}"
+
+	done < <(sed "$1" \
+		-e ':a;N;$!ba' \
+		-e 's/[[:space:]]*#[^\n]*//g' \
+		-e 's/\\\([[:space:]]*#[^\n]*\)\{0,1\}\n/ /g' \
+		-e 's/\n*\n/\n/g' \
+		-e 's/\(\(\"\([^\"]\|\\\"\)*\"\|[^[:space:]\"]\)\+\)[[:space:]]*=[[:space:]]*\(\(\"\([^\"]\|\\\"\)*\"\|[^[:space:]\"]\)\+\)/\1=\4/g' \
+		-e 's/[[:space:]]*$//g')
 }
 
-urlencode() {
-	local l=${#1}
-	for (( i = 0 ; i < l ; i++ )); do
-		local c=${1:i:1}
-		case "$c" in
-			[a-zA-Z0-9.~_-]) printf "%c" "$c";;
-			' ') printf + ;;
-			*) printf '%%%.2X' "'$c"
-		esac
-	done
-}
-
-urldecode() {
-	local url_encoded="${1//+/ }"
-	printf '%b' "${url_encoded//%/\\x}"
-}
-
-otp_uri() {
-	local uri="$1"
-
-	uri="${uri//\`/%60}"
-	uri="${uri//\"/%22}"
-
-	local pattern='^otpauth:\/\/(totp|hotp)(\/(([^:?]+)?(:([^:?]*))?)(:([0-9]+))?)?\?(.+)$'
-	[[ "$uri" =~ $pattern ]] || error "Cannot parse OTP key URI: $uri"
-
-	otp_uri=${BASH_REMATCH[0]}
-	otp_type=${BASH_REMATCH[1]}
-	otp_label=${BASH_REMATCH[3]}
-
-	otp_accountname=$(urldecode "${BASH_REMATCH[6]}")
-	[[ -z $otp_accountname ]] && otp_accountname=$(urldecode "${BASH_REMATCH[4]}") || otp_issuer=$(urldecode "${BASH_REMATCH[4]}")
-	[[ -z $otp_accountname ]] && error "Invalid key URI (missing accountname): $otp_uri"
-
-	local p=${BASH_REMATCH[9]}
-	local params
-	local IFS=\&; read -r -a params < <(echo "$p") ; unset IFS
-
-	pattern='^([^=]+)=(.+)$'
-	for param in "${params[@]}"; do
-		if [[ "$param" =~ $pattern ]]; then
-			case ${BASH_REMATCH[1]} in
-				secret) otp_secret=${BASH_REMATCH[2]} ;;
-				digits) otp_digits=${BASH_REMATCH[2]} ;;
-				algorithm) otp_algorithm=${BASH_REMATCH[2]} ;;
-				period) otp_period=${BASH_REMATCH[2]} ;;
-				counter) otp_counter=${BASH_REMATCH[2]} ;;
-				issuer) otp_issuer=$(urldecode "${BASH_REMATCH[2]}") ;;
-				*) ;;
-			esac
+find_entry() {
+	[[ "$1" != *.gpg ]] && echo "1" && return
+	for ((i = 3; i < ${#entries_glob[@]}; i++)); do
+		if [[ "${1%.gpg}" == ${entries_glob[$i]} ]]; then
+			echo "$i"
+			return
 		fi
 	done
-
-	[[ -z "$otp_secret" ]] && error "Invalid key URI (missing secret): $otp_uri"
-
-	pattern='^[0-9]+$'
-	[[ "$otp_type" == 'hotp' ]] && [[ ! "$otp_counter" =~ $pattern ]] && \
-	error "Invalid key URI (missing counter): $otp_uri"
+	echo "0"
 }
 
-BASE64="base64"
-SHRED="shred -f -z"
+# XXX: Fix this :0
+match_entry() {
+	# Expectes full path relative to the crypt
+	local path="$CRYPT_PATH/${1#$CRYPT_PATH/}"
+	readarray matches < <(find "$CRYPT_PATH/" -maxdepth 1 -path '*/.git' -prune -o -path "${path%/}*" -print)
+
+	case ${#matches[@]} in
+		0) confirm_entry "$1" ;;
+		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
+		*) error "Ambiguous entry name" ;;
+	esac
+}
+
+confirm_entry() {
+	local ans="$1"
+	while true; do
+		[[ "$ans" == *.gpg ]] && error "Ambiguous extension!"
+		local i=$(find_entry "$ans.gpg")
+		[[ ("$i" != "0" || ${#entries_glob[@]} -eq 3) && "$i" != "1" ]] && echo "$ans" && return
+		# TODO: Make something that given the entry name automatically appens the extension
+		read -r -p "Enter a file with a valid extension: " ans
+	done
+}
+
+# COMMANDS
 GETOPT="getopt"
-OATH=$(which oathtool)
+
+cmd_info() {
+	for ((i = 0; i < ${#entries_glob[@]}; i++)); do
+		echo "---"
+		echo "Entry #$i"
+		echo "Name: '${entries_name[$i]}'"
+		echo "Glob: '${entries_glob[$i]}'"
+		echo "Edit: '${entries_edit[$i]}'"
+		echo "Show: '${entries_show[$i]}'"
+		echo "Insert: '${entries_insert[$i]}'"
+
+		local reset="" color=""
+		color=$(get_color ${entries_color[$i]})
+		[ -z "$color" ] || reset=$(get_color reset)
+		printf "Color: '%s%s%s'\n" $color "${entries_color[$i]}" $reset
+	done
+}
 
 cmd_init() {
 	[[ $# -lt 1 ]] && error "Usage: $PROGRAM $COMMAND gpg-id..."
 
-	mkdir -v -p "$LOCATION/"
+	mkdir -v -p "$CRYPT_PATH/"
 	git_init
 
-	local gpg_id="$LOCATION/.gpg-id"
+	local gpg_id="$CRYPT_PATH/.gpg-id"
 	git_prep "$gpg_id"
 
 	if [[ $# -eq 1 && -z $1 ]]; then
 		[[ ! -f "$gpg_id" ]] && \
-		error"Error: $gpg_id does not exist and therefore it cannot be removed."
+		error "Error: $gpg_id does not exist and therefore it cannot be removed."
 
 		rm -v -f "$gpg_id" || exit 1
 		git -C "$INNER_GIT_DIR" rm -qr "$gpg_id"
@@ -282,189 +352,47 @@ cmd_init() {
 		git_track "$gpg_id" "Set GPG id to ${id_print%, }."
 	fi
 
-	reencrypt_path "$LOCATION/"
-	git_track "$LOCATION/" "Reencrypt crypt using new GPG id ${id_print%, }."
+	reencrypt_path "$CRYPT_PATH/"
+	git_track "$CRYPT_PATH/" "Reencrypt crypt using new GPG id ${id_print%, }."
 }
 
-cmd_add() {
-	local opts noecho=1 force=0
-	opts="$($GETOPT -o ef -l echo,force -n "$PROGRAM" -- "$@")"
+cmd_insert() {
+	local opts force=0
+	opts="$($GETOPT -o f -l force -n "$PROGRAM" -- "$@")"
 	local err=$?
 	eval set -- "$opts"
 	while true; do
 		case $1 in
-			-e|--echo) noecho=0; shift ;;
 			-f|--force) force=1; shift ;;
 			--)           shift; break ;;
 		esac
 	done
 
-	[[ $err -ne 0 || $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--echo,-e] [--force,-f] entry"
+	[[ $err -ne 0 || $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--force,-f] entry"
 	local path="${1%/}"
 	sneaky_path "$path"
-	path=$(confirm_kind $path)
+	path=$(confirm_entry $path)
 
-	local file="$LOCATION/$path.gpg"
+	local file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
 
 	[[ $force -eq 0 && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
-	mkdir -p -v "$LOCATION/$(dirname -- "$path")"
+	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	local kind
-	case "$path" in
-		*.pass)
-			kind="password"
-			if [[ $noecho -eq 1 ]]; then
-				local pass1 pass2
-				while true; do
-					read -r -p "Enter password for $path: " -s pass1 || exit 1
-					echo
-					read -r -p "Retype password for $path: " -s pass2 || exit 1
-					echo
-					if [[ "$pass1" == "$pass2" ]]; then
-						echo "$pass1" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" || \
-						error "Password encryption aborted."
-						break
-					else
-						error "Error: the entered passwords do not match."
-					fi
-				done
-			else
-				local pass
-				read -r -p "Enter password for $path: " -e pass
-				echo "$pass" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" || \
-				error "Password encryption aborted."
-			fi ;;
-		*.otp)
-			kind="otp"
-			local code
-			read -r -p "Enter otp code for $path: " -e code
-			echo "$code" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" || \
-			error "File encryption aborted."
-			;;
-		*.txt)
-			kind="text"
-			tmpdir
-			local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
+	local i=$(find_entry "$path.gpg")
 
-			local action="Add"
-			${EDITOR:-vi} "$tmp_file"
-			[[ -f $tmp_file ]] || error "New file not saved."
-			while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
-				confirm "GPG encryption failed. Would you like to try again?"
-			done
-			;;
-		*) error "Internal error" ;;
-	esac
+	tmpdir
+	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
 
-	git_track "$file" "Add $kind entry $path."
-}
+	eval "${entries_insert[$i]}" "$tmp_file"
+	[[ -f $tmp_file ]] || error "New file not saved."
 
-cmd_list() {
-	local opts notree=0
-	opts="$($GETOPT -o n -l no-tree -n "$PROGRAM" -- "$@")"
-	local err=$?
-	eval set -- "$opts"
-	while true; do
-		case $1 in
-			-n|--no-tree) notree=1; shift ;;
-			--)           shift; break ;;
-		esac
+	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
+		confirm "GPG encryption failed. Would you like to try again?"
 	done
-
-	local path="$LOCATION/${1#$LOCATION}"
-
-	if [[ $notree -eq 0 ]]; then
-		echo "${1:-Crypt ($(cd $LOCATION; dirs +0))}"
-		local ignore=""
-		[[ -f "$LOCATION/.ignore" ]] && ignore="--gitfile=$LOCATION/.ignore"
-		TREE_COLORS="rs=0:di=01;34:ln=01;36:" tree "$path" --noreport -C -l -N $ignore --info | \
-		sed "/ -> /d;s/\.txt.gpg$/\t$(tput setaf 1)text$(tput sgr0)/;s/\.pass.gpg$/\t$(tput setaf 3)password$(tput sgr0)/;s/\.otp.gpg$/\t$(tput setaf 2)otp$(tput sgr0)/" | \
-		column -t -s$'\t' | tail -n +2
-	else
-		local path2=$(echo $path | sed 's/\//\\\//g')
-		find "$path" -type f -iname '*.gpg' | sed "s/.gpg$//;s/^$path2\/*//"
-	fi
-}
-
-cmd_show() {
-	local path="$1"
-	sneaky_path "$path"
-	path=$(confirm_kind $path)
-
-	local file="$LOCATION/$path.gpg"
-
-	if [[ -f $file ]]; then
-		case "$path" in
-			*.pass)
-				local pass
-				pass="$($GPG -d "${GPG_OPTS[@]}" "$file" | $BASE64)" || exit $?
-				echo "$pass" | $BASE64 -d
-				;;
-			*.otp)
-				[[ -z "$OATH" ]] && error "Error: oathtool is not installed."
-
-  				local contents=$($GPG -d "${GPG_OPTS[@]}" "$file")
-  				while read -r line; do
-					if [[ "$line" == otpauth://* ]]; then
-					  	local uri="$line"
-					  	otp_uri "$line"
-					  	break
-					fi
-  				done < <(echo "$contents")
-
-  				local cmd
-  				case "$otp_type" in
-					totp)
-  				    	cmd="$OATH -b --totp"
-  				    	[[ -n "$otp_algorithm" ]] && cmd+=$(echo "=${otp_algorithm}"|tr "[:upper:]" "[:lower:]")
-  				    	[[ -n "$otp_period" ]] && cmd+=" --time-step-size=$otp_period"s
-  				    	[[ -n "$otp_digits" ]] && cmd+=" --digits=$otp_digits"
-  				    	cmd+=" $otp_secret"
-  				    	;;
-
-  				  	hotp)
-						local counter=$((otp_counter + 1))
-						cmd="$OATH -b --hotp --counter=$counter"
-						[[ -n "$otp_digits" ]] && cmd+=" --digits=$otp_digits"
-						cmd+=" $otp_secret"
-						;;
-
-  				  	*)
-  				    	error "$path: OTP secret not found."
-					;;
-  				esac
-
-  				local out; out=$($cmd) || error "$path: failed to generate OTP code."
-
-  				if [[ "$otp_type" == "hotp" ]]; then
-					local line replaced uri=${otp_uri/&counter=$otp_counter/&counter=$counter}
-					while IFS= read -r line; do
-					  [[ "$line" == otpauth://* ]] && line="$uri"
-					  [[ -n "$replaced" ]] && replaced+=$'\n'
-					  replaced+="$line"
-					done < <(echo "$contents")
-
-					otp_insert "$path" "$file" "$replaced" "Increment HOTP counter for $path." "$quiet"
-				fi
-				echo "$out"
-				;;
-			*.txt)
-				$GPG -d "${GPG_OPTS[@]}" "$file"
-				;;
-			*) error "Unsupported entry kind" ;;
-		esac
-	elif [[ -d $LOCATION/$path ]]; then
-		local treepath="$path"
-		[[ -z $path ]] && treepath="$LOCATION"
-		cmd_list "$treepath"
-	elif [[ -z $path ]]; then
-		error "Error: crypt is empty. Try initializing it first."
-	else
-		error "Error: $path is not in the crypt."
-	fi
+	git_track "$file" "Add ${entries_name[$i]} entry $path."
 }
 
 cmd_edit() {
@@ -472,13 +400,12 @@ cmd_edit() {
 
 	local path="${1%/}"
 	sneaky_path "$path"
+	path=$(match_entry "$path")
 
-	path=$(confirm_kind "$path")
-
-	mkdir -p -v "$LOCATION/$(dirname -- "$path")"
+	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	local file="$LOCATION/$path.gpg"
+	local file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
 
 	tmpdir
@@ -489,25 +416,67 @@ cmd_edit() {
 		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
 		action="Edit"
 	fi
-	${EDITOR:-vi} "$tmp_file"
+
+	local i=$(find_entry "$file")
+	eval "${entries_edit[$i]}" "$tmp_file"
 	[[ -f $tmp_file ]] || error "New file not saved."
-	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && error "File unchanged."
+
+	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && echo "File unchanged." && return
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
-	git_track "$file" "$action $path using ${EDITOR:-vi}."
+	git_track "$file" "$action ${entries_name[$i]} entry $path."
 }
 
-cmd_info() {
-	[[ $# -ne 0 ]] && error "Usage: $PROGRAM $COMMAND"
-	local file="$LOCATION/.info"
-	git_prep "$file"
-	${EDITOR:-vi} "$file"
-	git_track "$file" "Update .info file."
+
+_cmd_list_fmt() {
+	read -a tmp <<< "$@"
+	local path=${tmp[-1]}
+
+	local name="$(basename -- "$path")"
+	local entry=""
+
+	local color1="" reset1=""
+	local color2="" reset2=""
+
+	if [ -d "$path" ]; then
+		# DIR TYPE 2
+		color1="$(get_color ${entries_color[2]})$(tput bold)"
+		[ -z "$color1" ] || reset1=$(tput sgr0)
+	else
+		local i=$(find_entry "${path#$CRYPT_PATH/}")
+		entry="${entries_name[$i]}"
+
+		# Here we should also be able to use color1...
+		color2=$(get_color ${entries_color[$i]})
+		[ -z "$color2" ] || reset2=$(tput sgr0)
+
+		local name2="${name%${entries_glob[$i]}}"
+		[ -z "$name2" ] || name=$name2
+	fi
+
+	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry$reset2~" <<< "$@"
+}
+
+cmd_list() {
+	local path="$CRYPT_PATH/${1#$CRYPT_PATH}"
+	local header="Crypt ($(cd $CRYPT_PATH; dirs +0))"
+
+	if [ -n "$1" ]; then
+		local color="" reset=""
+		# DIR ENTRY 2
+		color=$(get_color ${entries_color[2]})
+		reset=$(get_color reset)
+		header="$color$1$reset"
+	fi
+
+	echo "$header"
+	tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
+	column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 }
 
 cmd_git() {
-	git_prep "$LOCATION/"
+	git_prep "$CRYPT_PATH/"
 	[[ -n $INNER_GIT_DIR ]] || \
 	error "Error: git repository is missing. It seems like crypt was not initialized properly."
 
@@ -516,9 +485,50 @@ cmd_git() {
 	git -C "$INNER_GIT_DIR" "$@"
 }
 
+cmd_show() {
+	local path="$1"
+	sneaky_path "$path"
+	path=$(match_entry $path)
+
+	local file="$CRYPT_PATH/$path.gpg"
+
+	if [[ -f $file ]]; then
+
+		mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
+		gpg_recipients "$(dirname -- "$path")"
+
+		git_prep "$file"
+
+		tmpdir
+		local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
+
+		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
+
+		local i=$(find_entry "$file")
+		eval "${entries_show[$i]}" "$tmp_file"
+		[[ -f $tmp_file ]] || error "New file not saved."
+
+		$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && return
+
+		while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
+			confirm "GPG encryption failed. Would you like to try again?"
+		done
+		git_track "$file" "Update ${entries_name[$i]} entry $path."
+
+	elif [[ -d $CRYPT_PATH/$path ]]; then
+		[[ -z $path ]] && path="$CRYPT_PATH"
+		cmd_list "$path"
+	elif [[ -z $path ]]; then
+		error "Error: crypt is empty. Try initializing it first."
+	else
+		error "Error: $path is not in the crypt."
+	fi
+}
+
 cmd_maybe_show() {
-	if [[ $# -eq 0 || ($# -eq 1 && $1 == "--no-tree") ]]; then
-		cmd_list "$@"
+	# TODO options
+	if [[ $# -eq 0 ]]; then
+		cmd_list
 	else
 		cmd_show "$@"
 	fi
@@ -528,18 +538,25 @@ cmd_help() {
 	cat <<-EOF
 		Usage:
 		    $PROGRAM init gpg-id...
-
-		    $PROGRAM [subfolder]
+				Initialize the crypt at \$CRYPT_PATH
 
 		    $PROGRAM [show] file
+				Show the file using the entry's associated show_action
 
-		    $PROGRAM add file
+		    $PROGRAM insert file
+				Insert the file using the entry's associated insert_action
 
 		    $PROGRAM edit file
+				Edit the file using the entry's associated edit_action
+
+		    $PROGRAM list
+				List the crypt structure, associating each file to its entry name
 
 		    $PROGRAM info
+				List the crypt registered entries
 
 		    $PROGRAM git git-args...
+				Run git commands
 
 		    $PROGRAM help
 		        Show this text
@@ -553,20 +570,28 @@ cmd_version() {
 	echo "crypt v0"
 }
 
+# MAIN
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-case "$1" in
-	init) shift; cmd_init "$@" ;;
-	add) shift; cmd_add "$@" ;;
-	show) shift; cmd_show "$@" ;;
-	edit) shift; cmd_edit "$@" ;;
-	info) shift; cmd_info "$@" ;;
-	git) shift; cmd_git "$@" ;;
-	list) shift; cmd_list "$@" ;;
+[ -f "$CRYPT_PATH/.entries" ] && entry_load "$CRYPT_PATH/.entries"
+
+case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
 	version|--version) shift; cmd_version "$@" ;;
+
+	#close|lock) ;;
+	#open|unlock) ;;
+	#check|verify) ;; #SIGNATURE
+	#vcs) ;;
+
+	git) shift; cmd_git "$@" ;;
+	init) shift; cmd_init "$@" ;;
+	info) shift; cmd_info "$@" ;;
+	edit) shift; cmd_edit "$@" ;;
+	insert) shift; cmd_insert "$@" ;;
+	list) shift; cmd_list "$@" ;;
+	show) shift; cmd_show "$@" ;;
 	*) cmd_maybe_show "$@" ;;
 esac
 exit 0
-
