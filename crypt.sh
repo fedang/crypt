@@ -549,7 +549,7 @@ cmd_list() {
 	if [ $plain -eq 0 ]; then
 		local header="Crypt ($(cd $CRYPT_PATH; dirs +0))"
 
-		if [ -n "$1" ]; then
+		if [[ -n "$1" && "$1" != $CRYPT_PATH ]]; then
 			local color="" reset=""
 			# DIR ENTRY 2
 			color=$(_color ${entries_color[2]})
@@ -605,12 +605,9 @@ cmd_show() {
 }
 
 cmd_maybe_show() {
-	# TODO options
-	if [[ $# -eq 0 ]]; then
-		cmd_list
-	else
-		cmd_show "$@"
-	fi
+	# TODO: Alternatives
+	COMMAND="show"
+	cmd_show "$@"
 }
 
 cmd_copy_move() {
