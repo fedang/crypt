@@ -551,6 +551,54 @@ cmd_maybe_show() {
 	fi
 }
 
+cmd_copy_move() {
+	[[ $# -ne 2 ]] && die "Usage: $PROGRAM $COMMAND old-path new-path"
+
+	sneaky_path "$1" "$2"
+	local old_path="$CRYPT_PATH/${1%/}"
+	old_path="${old_path%.gpg}"
+	local old_dir="$old_path"
+	local new_path="$CRYPT_PATH/$2"
+
+	[[ "$new_path" == *.gpg ]] && error "Ambiguous extension for $2"
+
+	if ! [[ -f $old_path.gpg && -d $old_path && $1 == */ || ! -f $old_path.gpg ]]; then
+		old_dir="${old_path%/*}"
+		old_path="${old_path}.gpg"
+	fi
+	[[ -e $old_path ]] || error "Error: $1 is not in the password store."
+
+	mkdir -p -v "${new_path%/*}"
+	[[ -d $old_path || -d $new_path || $new_path == */ ]] || new_path="${new_path}.gpg"
+
+	local interactive="-i"
+	[[ ! -t 0 ]] && interactive="-f"
+
+	git_prep "$new_path"
+	if [[ $COMMAND == "move" ]]; then
+		mv $interactive -v "$old_path" "$new_path" || exit 1
+		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
+
+		git_prep "$new_path"
+		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
+			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
+			git_prep "$new_path"
+			git_track "$new_path" "Move ${1} to ${2}."
+		fi
+		git_prep "$old_path"
+		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
+			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
+			git_prep "$old_path"
+			[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$old_path") ]] && git_commit "Remove ${1}."
+		fi
+		rmdir -p "$old_dir" 2>/dev/null
+	else
+		cp $interactive -r -v "$old_path" "$new_path" || exit 1
+		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
+		git_track "$new_path" "Copy ${1} to ${2}."
+	fi
+}
+
 cmd_help() {
 	cat <<-EOF
 		Usage:
@@ -609,6 +657,8 @@ case "$COMMAND" in
 	insert) shift; cmd_insert "$@" ;;
 	list) shift; cmd_list "$@" ;;
 	show) shift; cmd_show "$@" ;;
+	move) shift; cmd_copy_move "$@" ;;
+	copy) shift; cmd_copy_move "$@" ;;
 	*) cmd_maybe_show "$@" ;;
 esac
 exit 0
