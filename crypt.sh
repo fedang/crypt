@@ -661,6 +661,19 @@ cmd_copy_move() {
 	fi
 }
 
+cmd_grep() {
+	[[ $# -lt 1 ]] && die "Usage: $PROGRAM $COMMAND [GREPOPTIONS] search-string"
+	local file results
+	while read -r -d "" file; do
+		results="$($GPG -d "${GPG_OPTS[@]}" "$file" | grep --color=always "$@")"
+		[[ $? -ne 0 ]] && continue
+		file="${file%.gpg}"
+		file="${file#$CRYPT_PATH/}"
+		echo "$(_color cyan,bold)$file$(_color reset):"
+		echo "$results"
+	done < <(find -L "$CRYPT_PATH" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print0)
+}
+
 cmd_help() {
 	cat <<-EOF
 		Usage:
@@ -678,6 +691,9 @@ cmd_help() {
 
 		    $PROGRAM list [--plain]
 		        List the crypt structure, associating each file to its entry name
+
+		    $PROGRAM grep [GREPOPTIONS] search-string
+		        Run grep with GREPOPTIONS and search-string
 
 		    $PROGRAM info
 		        List the crypt registered entries
@@ -727,6 +743,7 @@ case "$COMMAND" in
 	edit) shift; cmd_edit "$@" ;;
 	insert) shift; cmd_insert "$@" ;;
 	show) shift; cmd_show "$@" ;;
+	grep) shift; cmd_grep "$@" ;;
 	list|ls) shift; cmd_list "$@" ;;
 	move|mv) shift; cmd_copy_move "$@" ;;
 	copy|cp) shift; cmd_copy_move "$@" ;;
