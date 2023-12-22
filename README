@@ -1,1 +1,6 @@
-Crypt is a simple program for managing encrypted files (passwords, otp secrets, text)
+Crypt is a single bash script for managing an encrypted files repository.
+Every file can be associated with actions (insert, edit, show, etc).
+For example, you can have password entries and otp entries, the former being
+copied to your clipboard when selected and the latter generating their code.
+Or you could simply use it as a safe to keep your annotations.
+It is really up to you how you want to configure your crypt's configuration.
