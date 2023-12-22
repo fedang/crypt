@@ -329,8 +329,8 @@ find_info() {
 	done
 }
 
-# Expects a non-directory path
 check_file() {
+	# Expects a non-directory path
 	local path="${1#$CRYPT_PATH/}"
 	[[ -f "$path.gpg" ]] && echo "$path" && return
 
@@ -341,7 +341,7 @@ check_file() {
 
 	#printf "%q\n" "${matches[@]}" >&2
 	case ${#matches[@]} in
-		0) confirm_file "$path" ;;
+		0) [[ "$2" == "noask" ]] || confirm_file "$path" ;;
 		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
 		*) error "Ambiguous entry name: ${matches[@]}" ;;
 	esac
@@ -350,9 +350,12 @@ check_file() {
 confirm_file() {
 	local ans="$1"
 	while true; do
-		[[ "$ans" == *.gpg ]] && echo "Ambiguous extension!" >&2
-		find_info "$ans"
-		[[ ("$file_entry" != "unknown" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "unencrypted" ]] && echo "$ans" && return
+		#[[ "$ans" == *.gpg ]] && echo "Ambiguous extension!" >&2
+		ans="${ans%.gpg}"
+		find_info "$ans.gpg"
+
+		#printf "%s\n" "$file_entry" >&2
+		[[ ("$file_entry" != "${entries_name[0]}" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "${entries_name[1]}" ]] && echo "$ans" && return
 		# TODO: Make something that given the entry name automatically appends the extension
 		read -r -p "Enter a file with a valid extension: " ans
 	done
@@ -417,71 +420,56 @@ cmd_init() {
 	git_track "$CRYPT_PATH/" "Reencrypt crypt using new GPG id ${id_print%, }."
 }
 
-cmd_insert() {
-	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--force,-f] entry"
-
-	local path="${1%/}"
-	sneaky_path "$path"
-	path=$(confirm_file $path)
-
-	local file="$CRYPT_PATH/$path.gpg"
-	git_prep "$file"
-
-	[[ -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
+_cmd_edit_file() {
+	local path="$1" file="$CRYPT_PATH/$path.gpg"
+	[[ -d $file ]] && error "Error: Path is a directory"
+	[[ "$2" == file_insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
+	git_prep "$file"
 	find_info "$file"
 
-	# TODO: Make function to do the edit boilerplate
-
 	tmpdir
-	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
+	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
 
-	eval "$file_insert" "$tmp_file"
-	[[ -f $tmp_file ]] || error "New file not saved."
+	local action="Insert"
+	if [[ -f $file && "$2" != file_insert ]]; then
+		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
+		action="Update"
+	fi
+
+	eval "${!2}" "$tmp_file"
+	[[ -f $tmp_file ]] || error "File not saved."
+
+	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
+	([[ "$2" == file_show ]] || echo "File unchanged.") && return
 
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
-	git_track "$file" "Add $file_entry entry $path."
+	git_track "$file" "$action $file_entry entry $path."
 }
 
+
+cmd_insert() {
+	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND entry"
+
+	local path="${1%/}"
+	sneaky_path "$path"
+	path=$(confirm_file "$path")
+	_cmd_edit_file "$path" file_insert
+}
+
+# TODO: Handle unencrypted files
 cmd_edit() {
 	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND file"
 
 	local path="${1%/}"
 	sneaky_path "$path"
 	path=$(check_file "$path")
-	echo $path
-
-	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
-	gpg_recipients "$(dirname -- "$path")"
-
-	local file="$CRYPT_PATH/$path.gpg"
-	[[ -d $file ]] && error "Path is a directory"
-	git_prep "$file"
-
-	tmpdir
-	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
-
-	local action="Add"
-	if [[ -f $file ]]; then
-		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
-		action="Edit"
-	fi
-
-	find_info "$file"
-
-	eval "$file_edit" "$tmp_file"
-	[[ -f $tmp_file ]] || error "New file not saved."
-
-	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && echo "File unchanged." && return
-	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
-		confirm "GPG encryption failed. Would you like to try again?"
-	done
-	git_track "$file" "$action $file_entry entry $path."
+	_cmd_edit_file "$path" file_edit
 }
 
 
@@ -498,7 +486,10 @@ _cmd_list_fmt() {
 	local color2="$(_color $file_color2)" reset2=""
 	[ -z "$file_color2" ] || reset2="$(_color reset)"
 
-	sed "s~$path~$color1${name%$file_glob.gpg}$reset1\t\v$color2$file_entry$reset2~" <<< "$@"
+	local tmp=${name%$file_glob}
+	[ -z tmp ] || name=$tmp
+
+	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$file_entry$reset2~" <<< "$@"
 }
 
 cmd_list() {
@@ -536,37 +527,17 @@ cmd_show() {
 		[[ -z $path ]] && path="$CRYPT_PATH"
 		cmd_list "$path"
 	else
-		path=$(check_file $path)
+		path="${1%/}"
+		sneaky_path "$path"
+		path=$(check_file "${path%.gpg}" noask)
 		[[ $? -eq 0 ]] || exit 1
 
-		local file="$CRYPT_PATH/${path%.gpg}.gpg"
-		if [[ -f $file ]]; then
-			mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
-			gpg_recipients "$(dirname -- "$path")"
-
-			git_prep "$file"
-
-			tmpdir
-			local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
-
-			$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
-
-			find_info "$file"
-
-			eval "$file_show" "$tmp_file"
-			[[ -f $tmp_file ]] || error "New file not saved."
-
-			$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && return
-
-			while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
-				confirm "GPG encryption failed. Would you like to try again?"
-			done
-			git_track "$file" "Update $file_entry entry $path."
-
-		elif [[ -z $path ]]; then
-			error "Error: crypt is empty. Try initializing it first."
+		if [[ -z "$path" ]]; then
+			error "Error: $1 not found in the crypt."
+		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
+			_cmd_edit_file "$path" file_show
 		else
-			error "Error: $path is not in the crypt."
+			error "Error: Try to initialize the crypt."
 		fi
 	fi
 }
