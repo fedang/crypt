@@ -46,8 +46,7 @@ git_prep() {
 	while [[ ! -d $INNER_GIT_DIR && ${INNER_GIT_DIR%/*}/ == "${CRYPT_PATH%/}/"* ]]; do
 		INNER_GIT_DIR="${INNER_GIT_DIR%/*}"
 	done
-	[[ $(git -C "$INNER_GIT_DIR" rev-parse --is-inside-work-tree 2>/dev/null) == true ]] || \
-	error "Error: git repository is missing. It seems like crypt was not initialized properly."
+	[[ $(git -C "$INNER_GIT_DIR" rev-parse --is-inside-work-tree 2>/dev/null) == true ]] || INNER_GIT_DIR=""
 }
 
 git_track() {
@@ -333,11 +332,11 @@ find_info() {
 check_file() {
 	# Expects a non-directory path
 	local path="${1#$CRYPT_PATH/}"
-	[[ -f "$path.gpg" ]] && echo "$path" && return
+	[[ -f "$CRYPT_PATH/$path.gpg" ]] && echo "$path" && return
 
 	local matches=()
 	for ((i = 3; i < ${#entries_glob[@]}; i++)); do
-		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -maxdepth 1 -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_glob[$i]}.gpg" -print)
+		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_glob[$i]}.gpg" -print)
 	done
 
 	#printf "%q\n" "${matches[@]}" >&2
@@ -423,13 +422,14 @@ cmd_init() {
 
 _cmd_edit_file() {
 	local path="$1" file="$CRYPT_PATH/$path.gpg"
+	git_prep "$file"
+
 	[[ -d $file ]] && error "Error: Path is a directory"
 	[[ "$2" == file_insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	git_prep "$file"
 	find_info "$file"
 
 	tmpdir
@@ -530,7 +530,6 @@ cmd_show() {
 		cmd_list "$path"
 	else
 		path="${1%/}"
-		sneaky_path "$path"
 		path=$(check_file "${path%.gpg}" noask)
 		[[ $? -eq 0 ]] || exit 1
 
