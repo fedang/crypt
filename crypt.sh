@@ -194,8 +194,8 @@ entries_show=()
 entries_edit=()
 entries_color=()
 
-# Unknown entry
-entries_glob+=( "@unknown" )
+# Unknown entry @unknown
+entries_glob+=( "" )
 entries_name+=( "unknown" )
 entries_insert+=( "none" )
 entries_show+=( "none" )
@@ -475,6 +475,39 @@ cmd_edit() {
 	_cmd_edit_file "$path" file_edit
 }
 
+cmd_remove() {
+	local opts recursive="" force=0
+	opts="$($GETOPT -o rf -l recursive,force -n "$PROGRAM" -- "$@")"
+	local err=$?
+	eval set -- "$opts"
+	while true; do case $1 in
+		-r|--recursive) recursive="-r"; shift ;;
+		-f|--force) force=1; shift ;;
+		--) shift; break ;;
+	esac done
+
+	[[ $# -ne 1 ]] && die "Usage: $PROGRAM $COMMAND [--recursive,-r] [--force,-f] pass-name"
+	local path="$1"
+	sneaky_path "$path"
+
+	local dir="$CRYPT_PATH/${path%/}"
+	local file="$CRYPT_PATH/$path.gpg"
+
+	[[ -f $file && -d $dir && $path == */ || ! -f $file ]] && file="${dir%/}/"
+	[[ -e $file ]] || error "Error: $path is not in the password store."
+	git_prep "$file"
+
+	[[ $force -eq 1 ]] || confirm "Are you sure you would like to delete $path?"
+
+	rm $recursive -f -v "$file"
+	git_prep "$file"
+	if [[ -n $INNER_GIT_DIR && ! -e $file ]]; then
+		git -C "$INNER_GIT_DIR" rm -qr "$file"
+		git_prep "$file"
+		git_commit "Remove $path from store."
+	fi
+	rmdir -p "${file%/*}" 2>/dev/null
+}
 
 _cmd_list_fmt() {
 	read -a tmp <<< "$@"
@@ -626,6 +659,15 @@ cmd_help() {
 		    $PROGRAM git git-args...
 		        Run git commands
 
+		    $PROGRAM move old-path new-path
+		        Move a file from old-path to new-path
+
+		    $PROGRAM copy old-path new-path
+		        Copy a file from old-path to new-path
+
+		    $PROGRAM remove path [-fr]
+		        Remove a file or directory
+
 		    $PROGRAM help
 		        Show this text
 
@@ -658,10 +700,11 @@ case "$COMMAND" in
 	info) shift; cmd_info "$@" ;;
 	edit) shift; cmd_edit "$@" ;;
 	insert) shift; cmd_insert "$@" ;;
-	list) shift; cmd_list "$@" ;;
 	show) shift; cmd_show "$@" ;;
-	move) shift; cmd_copy_move "$@" ;;
-	copy) shift; cmd_copy_move "$@" ;;
+	list|ls) shift; cmd_list "$@" ;;
+	move|mv) shift; cmd_copy_move "$@" ;;
+	copy|cp) shift; cmd_copy_move "$@" ;;
+	remove|rm) shift; cmd_remove "$@" ;;
 	*) cmd_maybe_show "$@" ;;
 esac
 exit 0
