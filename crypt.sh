@@ -5,6 +5,7 @@ set -o pipefail
 
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 
+# UTILITIES
 declare -A _colors=(
 	["bold"]="$(tput bold)" 		["reset"]="$(tput sgr0)"
 	["black"]="$(tput setaf 0)" 	["gray"]="$(tput setaf 8)"
@@ -305,7 +306,7 @@ find_info() {
 	file_edit=${entries_edit[$entry]}
 
 	# TODO: Fix ad hoc handling
-	if [[ $entry -eq 2 ]]; then
+	if [ $entry -eq 2 ]; then
 		file_color1=${entries_color[$entry]}
 		return
 	else
@@ -480,10 +481,11 @@ _cmd_list_fmt() {
 	local name="$(basename -- "$path")"
 	find_info "$path"
 
-	local color1="$(_color $file_color1)" reset1=""
+	# FIXME: color1 screws up in the tree view sometimes
+	local color1="$(_color "$file_color1")" reset1=""
 	[ -z "$file_color1" ] || reset1="$(_color reset)"
 
-	local color2="$(_color $file_color2)" reset2=""
+	local color2="$(_color "$file_color2")" reset2=""
 	[ -z "$file_color2" ] || reset2="$(_color reset)"
 
 	local tmp=${name%$file_glob}
@@ -603,25 +605,25 @@ cmd_help() {
 	cat <<-EOF
 		Usage:
 		    $PROGRAM init gpg-id...
-				Initialize the crypt at \$CRYPT_PATH
+		        Initialize the crypt at \$CRYPT_PATH
 
 		    $PROGRAM [show] file
-				Show the file using the entry's associated show_action
+		        Show the file using the entry's associated show_action
 
 		    $PROGRAM insert file
-				Insert the file using the entry's associated insert_action
+		        Insert the file using the entry's associated insert_action
 
 		    $PROGRAM edit file
-				Edit the file using the entry's associated edit_action
+		        Edit the file using the entry's associated edit_action
 
 		    $PROGRAM list
-				List the crypt structure, associating each file to its entry name
+		        List the crypt structure, associating each file to its entry name
 
 		    $PROGRAM info
-				List the crypt registered entries
+		        List the crypt registered entries
 
 		    $PROGRAM git git-args...
-				Run git commands
+		        Run git commands
 
 		    $PROGRAM help
 		        Show this text
@@ -639,6 +641,7 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
+# TODO: Make a serious crypt structure
 [ -f "$CRYPT_PATH/.entries" ] && load_info "$CRYPT_PATH/.entries"
 
 case "$COMMAND" in
@@ -648,7 +651,6 @@ case "$COMMAND" in
 	#close|lock) ;;
 	#open|unlock) ;;
 	#check|verify) ;; #SIGNATURE
-	#vcs) ;;
 
 	git) shift; cmd_git "$@" ;;
 	init) shift; cmd_init "$@" ;;
