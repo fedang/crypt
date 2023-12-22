@@ -4,6 +4,7 @@ umask 077
 set -o pipefail
 
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
+CRYPT_EXTENSION="${CRYPT_EXTENSION:-$CRYPT_PATH/.extensions}"
 
 # UTILITIES
 declare -A _colors=(
@@ -35,6 +36,41 @@ confirm() {
 	local ans
 	read -r -p "$1 [y/N] " ans
 	[[ $ans == [yY] ]] || exit 1
+}
+
+sneaky_path() {
+	local path
+	for path in "$@"; do
+		[[ $path =~ /\.\.$ || $path =~ ^\.\./ || $path =~ /\.\./ || $path =~ ^\.\.$ ]] \
+		&& error "Error: You have passed a sneaky path..."
+	done
+}
+
+tmpdir() {
+	[[ -n $SECURE_TMPDIR ]] && return
+	local template="$PROGRAM.XXXXXXXXXXXXX"
+	if [[ -d /dev/shm && -w /dev/shm && -x /dev/shm ]]; then
+		SECURE_TMPDIR="$(mktemp -d "/dev/shm/$template")"
+		remove_tmpfile() {
+			rm -rf "$SECURE_TMPDIR"
+		}
+		trap remove_tmpfile EXIT
+	else
+		[[ $1 == "nowarn" ]] || confirm "$(cat <<-_EOF
+		Your system does not have /dev/shm, which means that it may
+		be difficult to entirely erase the temporary non-encrypted
+		password file after editing.
+
+		Are you sure you would like to continue?
+		_EOF
+		)"
+		SECURE_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/$template")"
+		shred_tmpfile() {
+			find "$SECURE_TMPDIR" -type f -exec $SHRED {} +
+			rm -rf "$SECURE_TMPDIR"
+		}
+		trap shred_tmpfile EXIT
+	fi
 }
 
 # GIT HANDLING
@@ -116,40 +152,7 @@ gpg_recipients() {
 	done < "$current"
 }
 
-sneaky_path() {
-	local path
-	for path in "$@"; do
-		[[ $path =~ /\.\.$ || $path =~ ^\.\./ || $path =~ /\.\./ || $path =~ ^\.\.$ ]] \
-		&& error "Error: You have passed a sneaky path..."
-	done
-}
-
-tmpdir() {
-	[[ -n $SECURE_TMPDIR ]] && return
-	local template="$PROGRAM.XXXXXXXXXXXXX"
-	if [[ -d /dev/shm && -w /dev/shm && -x /dev/shm ]]; then
-		SECURE_TMPDIR="$(mktemp -d "/dev/shm/$template")"
-		remove_tmpfile() {
-			rm -rf "$SECURE_TMPDIR"
-		}
-		trap remove_tmpfile EXIT
-	else
-		[[ $1 == "nowarn" ]] || confirm "$(cat <<-_EOF
-		Your system does not have /dev/shm, which means that it may
-		be difficult to entirely erase the temporary non-encrypted
-		password file after editing.
-
-		Are you sure you would like to continue?
-		_EOF
-		)"
-		SECURE_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/$template")"
-		shred_tmpfile() {
-			find "$SECURE_TMPDIR" -type f -exec $SHRED {} +
-			rm -rf "$SECURE_TMPDIR"
-		}
-		trap shred_tmpfile EXIT
-	fi
-}
+#TODO: SIGNING
 
 reencrypt_path() {
 	local prev_gpg_recipients="" gpg_keys="" current_keys="" index file
@@ -181,7 +184,7 @@ reencrypt_path() {
 			mv "$file_temp" "$file" || rm -f "$file_temp"
 		fi
 		prev_gpg_recipients="${GPG_RECIPIENTS[*]}"
-	done < <(find "$1" -path '*/.git' -prune -o -name '*.extensions' -prune -o -iname '*.gpg' -print0)
+	done < <(find "$1" -path '*/.git' -prune -o -name '*/.extensions' -prune -o -iname '*.gpg' -print0)
 }
 
 # FILE INFO
@@ -343,7 +346,7 @@ check_file() {
 	case ${#matches[@]} in
 		0) [[ "$2" == "noask" ]] || confirm_file "$path" ;;
 		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
-		*) error "Ambiguous entry name: ${matches[@]}" ;;
+		*) error "Ambiguous entry name: $(echo "${matches[@]}" | sed "s~$CRYPT_PATH/\([^[:space:]]*\).gpg~\1~g")" ;;
 	esac
 }
 
