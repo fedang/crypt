@@ -5,24 +5,22 @@ set -o pipefail
 
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 
-declare -A colors=(
-	["bold"]="$(tput bold)"
-	["reset"]="$(tput sgr0)"
-	["black"]="$(tput setaf 0)"
-	["red"]="$(tput setaf 1)"
-	["green"]="$(tput setaf 2)"
-	["yellow"]="$(tput setaf 3)"
-	["blue"]="$(tput setaf 4)"
-	["magenta"]="$(tput setaf 5)"
-	["cyan"]="$(tput setaf 6)"
-	["white"]="$(tput setaf 7)"
-	["gray"]="$(tput setaf 8)"
+declare -A _colors=(
+	["bold"]="$(tput bold)" 		["reset"]="$(tput sgr0)"
+	["black"]="$(tput setaf 0)" 	["gray"]="$(tput setaf 8)"
+	["red"]="$(tput setaf 1)"		["bright-red"]="$(tput setaf 9)"
+	["green"]="$(tput setaf 2)"		["bright-green"]="$(tput setaf 10)"
+	["yellow"]="$(tput setaf 3)"	["bright-yellow"]="$(tput setaf 11)"
+	["blue"]="$(tput setaf 4)"		["bright-blue"]="$(tput setaf 12)"
+	["magenta"]="$(tput setaf 5)"	["bright-magenta"]="$(tput setaf 13)"
+	["cyan"]="$(tput setaf 6)"		["bright-cyan"]="$(tput setaf 14)"
+	["white"]="$(tput setaf 7)"		["bright-white"]="$(tput setaf 15)"
 )
 
-get_color() {
+_color() {
 	IFS=',' read -ra arr <<< "$@"
 	for c in "${arr[@]}"; do
-		printf "%s" "${colors[$c]}"
+		printf "%s" "${_colors[$c]}"
 	done
 }
 
@@ -228,20 +226,22 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
+# Data for each rule
+# - glob
+# - entry
+# - color
+rules_glob=()
+rules_entry=()
+rules_color=()
+
 function none() {
-	echo "$(get_color red,bold)No action specified$(get_color reset)"
+	echo "$(_color red,bold)No action specified$(_color reset)"
 }
 
-entry_load() {
+load_info() {
 	while IFS= read -r line; do
 		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
-		declare -A opts=(
-			["name"]="none"
-			["edit_action"]="none"
-			["insert_action"]="none"
-			["show_action"]="none"
-			["color"]="none"
-		)
+		declare -A opts=( ["name"]="none" ["edit_action"]="none" ["insert_action"]="none" ["show_action"]="none" ["color"]="none" ["entry"]="none" )
 
 		for w in "${arr[@]:1}"; do
 			IFS='=' read -r k v <<< "$w"
@@ -254,10 +254,22 @@ entry_load() {
 			\@unknown) i=0 ;;
 			\@unencrypted) i=1 ;;
 			\@directory) i=2 ;;
-			*) i="${#entries_glob[@]}" ;;
+			\@entry) i="${#entries_glob[@]}" ;;
+			*)	# RULES
+				i="${#rules_glob[@]}";
+				rules_glob[$i]="${arr[0]}";
+				rules_entry[$i]=0
+				for ((j = 3; j < ${#entries_name[@]}; j++)); do
+					if [[ "${opts[entry]}" == ${entries_name[j]} ]]; then
+						rules_entry[$i]=$j
+					fi
+				done
+				rules_color[$i]="${opts[color]}"
+				continue
+				;;
 		esac
 
-		entries_glob[$i]="${arr[0]}"
+		entries_glob[$i]="*.${opts[extension]}"
 		entries_name[$i]="${opts[name]}"
 		entries_insert[$i]="${opts[insert_action]}"
 		entries_show[$i]="${opts[show_action]}"
@@ -273,36 +285,86 @@ entry_load() {
 		-e 's/[[:space:]]*$//g')
 }
 
-find_entry() {
-	[[ "$1" != *.gpg ]] && echo "1" && return
-	for ((i = 3; i < ${#entries_glob[@]}; i++)); do
-		if [[ "${1%.gpg}" == ${entries_glob[$i]} ]]; then
-			echo "$i"
-			return
+find_info() {
+	# Current file info
+	file_glob=""
+	file_entry=""
+	file_insert=""
+	file_show=""
+	file_edit=""
+	file_color1=""
+	file_color2=""
+
+	# Find entry
+	local path="${1#$CRYPT_PATH/}" entry=0
+	if [ -d "$CRYPT_PATH/$path" ]; then
+		entry=2
+	elif [[ "$path" != *.gpg ]]; then
+		entry=1
+	else
+		for ((i = 3; i < ${#entries_glob[@]}; i++)); do
+			if [[ "${path%.gpg}" == ${entries_glob[$i]} ]]; then
+				entry=$i
+				break
+			fi
+		done
+	fi
+
+	file_glob=${entries_glob[$entry]}
+	file_entry=${entries_name[$entry]}
+	file_insert=${entries_insert[$entry]}
+	file_show=${entries_show[$entry]}
+	file_edit=${entries_edit[$entry]}
+
+	# TODO: Fix ad hoc handling
+	if [[ $entry -eq 2 ]]; then
+		file_color1=${entries_color[$entry]}
+		return
+	else
+		file_color2=${entries_color[$entry]}
+	fi
+
+	# Find rules
+	for ((i = 0; i < ${#rules_glob[@]}; i++)); do
+		if [[ "${path%.gpg}" == ${rules_glob[$i]} ]]; then
+			if [[ ${rules_entry[$i]} -ne 0 ]]; then
+				entry=${rules_entry[$i]}
+				file_glob=${rules_glob[$entry]}
+				file_entry=${entries_name[$entry]}
+				file_insert=${entries_insert[$entry]}
+				file_show=${entries_show[$entry]}
+				file_edit=${entries_edit[$entry]}
+				file_color2=${entries_color[$entry]}
+			fi
+			file_color1=${rules_color[$i]}
 		fi
 	done
-	echo "0"
 }
 
-# XXX: Fix this :0
-match_entry() {
-	# Expectes full path relative to the crypt
-	local path="$CRYPT_PATH/${1#$CRYPT_PATH/}"
-	readarray matches < <(find "$CRYPT_PATH/" -maxdepth 1 -path '*/.git' -prune -o -path "${path%/}*" -print)
+# Expects a non-directory path
+check_file() {
+	local path="${1#$CRYPT_PATH/}"
+	[[ -f "$path.gpg" ]] && echo "$path" && return
 
+	local matches=()
+	for ((i = 3; i < ${#entries_glob[@]}; i++)); do
+		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -maxdepth 1 -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_glob[$i]}.gpg" -print)
+	done
+
+	#printf "%q\n" "${matches[@]}" >&2
 	case ${#matches[@]} in
-		0) confirm_entry "$1" ;;
+		0) confirm_file "$path" ;;
 		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
-		*) error "Ambiguous entry name" ;;
+		*) error "Ambiguous entry name: ${matches[@]}" ;;
 	esac
 }
 
-confirm_entry() {
+confirm_file() {
 	local ans="$1"
 	while true; do
-		[[ "$ans" == *.gpg ]] && error "Ambiguous extension!"
-		local i=$(find_entry "$ans.gpg")
-		[[ ("$i" != "0" || ${#entries_glob[@]} -eq 3) && "$i" != "1" ]] && echo "$ans" && return
+		[[ "$ans" == *.gpg ]] && echo "Ambiguous extension!" >&2
+		find_info "$ans"
+		[[ ("$file_entry" != "unknown" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "unencrypted" ]] && echo "$ans" && return
 		# TODO: Make something that given the entry name automatically appens the extension
 		read -r -p "Enter a file with a valid extension: " ans
 	done
@@ -310,9 +372,10 @@ confirm_entry() {
 
 # COMMANDS
 GETOPT="getopt"
+SHRED="shred -f -z"
 
 cmd_info() {
-	for ((i = 0; i < ${#entries_glob[@]}; i++)); do
+	for ((i = 0; i < ${#entries_name[@]}; i++)); do
 		echo "---"
 		echo "Entry #$i"
 		echo "Name: '${entries_name[$i]}'"
@@ -322,9 +385,21 @@ cmd_info() {
 		echo "Insert: '${entries_insert[$i]}'"
 
 		local reset="" color=""
-		color=$(get_color ${entries_color[$i]})
-		[ -z "$color" ] || reset=$(get_color reset)
+		color=$(_color ${entries_color[$i]})
+		[ -z "$color" ] || reset=$(_color reset)
 		printf "Color: '%s%s%s'\n" $color "${entries_color[$i]}" $reset
+	done
+
+	for ((i = 0; i < ${#rules_glob[@]}; i++)); do
+		echo "---"
+		echo "Rule #$i"
+		echo "Glob: '${rules_glob[$i]}'"
+		echo "Entry: '${rules_entry[$i]}'"
+
+		local reset="" color=""
+		color=$(_color ${rules_color[$i]})
+		[ -z "$color" ] || reset=$(_color reset)
+		printf "Color: '%s%s%s'\n" $color "${rules_color[$i]}" $reset
 	done
 }
 
@@ -371,7 +446,7 @@ cmd_insert() {
 	[[ $err -ne 0 || $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--force,-f] entry"
 	local path="${1%/}"
 	sneaky_path "$path"
-	path=$(confirm_entry $path)
+	path=$(confirm_file $path)
 
 	local file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
@@ -381,18 +456,18 @@ cmd_insert() {
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	local i=$(find_entry "$path.gpg")
+	find_info "$file"
 
 	tmpdir
 	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
 
-	eval "${entries_insert[$i]}" "$tmp_file"
+	eval "$file_insert" "$tmp_file"
 	[[ -f $tmp_file ]] || error "New file not saved."
 
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
-	git_track "$file" "Add ${entries_name[$i]} entry $path."
+	git_track "$file" "Add $file_entry entry $path."
 }
 
 cmd_edit() {
@@ -400,12 +475,14 @@ cmd_edit() {
 
 	local path="${1%/}"
 	sneaky_path "$path"
-	path=$(match_entry "$path")
+	path=$(check_file "$path")
+	echo $path
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
 	local file="$CRYPT_PATH/$path.gpg"
+	[[ -d $file ]] && error "Path is a directory"
 	git_prep "$file"
 
 	tmpdir
@@ -417,8 +494,9 @@ cmd_edit() {
 		action="Edit"
 	fi
 
-	local i=$(find_entry "$file")
-	eval "${entries_edit[$i]}" "$tmp_file"
+	find_info "$file"
+
+	eval "$file_edit" "$tmp_file"
 	[[ -f $tmp_file ]] || error "New file not saved."
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && echo "File unchanged." && return
@@ -434,28 +512,15 @@ _cmd_list_fmt() {
 	local path=${tmp[-1]}
 
 	local name="$(basename -- "$path")"
-	local entry=""
+	find_info "$path"
 
-	local color1="" reset1=""
-	local color2="" reset2=""
+	local color1="$(_color $file_color1)" reset1=""
+	[ -z "$file_color1" ] || reset1="$(_color reset)"
 
-	if [ -d "$path" ]; then
-		# DIR TYPE 2
-		color1="$(get_color ${entries_color[2]})$(tput bold)"
-		[ -z "$color1" ] || reset1=$(tput sgr0)
-	else
-		local i=$(find_entry "${path#$CRYPT_PATH/}")
-		entry="${entries_name[$i]}"
+	local color2="$(_color $file_color2)" reset2=""
+	[ -z "$file_color2" ] || reset2="$(_color reset)"
 
-		# Here we should also be able to use color1...
-		color2=$(get_color ${entries_color[$i]})
-		[ -z "$color2" ] || reset2=$(tput sgr0)
-
-		local name2="${name%${entries_glob[$i]}}"
-		[ -z "$name2" ] || name=$name2
-	fi
-
-	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry$reset2~" <<< "$@"
+	sed "s~$path~$color1${name%$file_glob.gpg}$reset1\t\v$color2$file_entry$reset2~" <<< "$@"
 }
 
 cmd_list() {
@@ -465,8 +530,8 @@ cmd_list() {
 	if [ -n "$1" ]; then
 		local color="" reset=""
 		# DIR ENTRY 2
-		color=$(get_color ${entries_color[2]})
-		reset=$(get_color reset)
+		color=$(_color ${entries_color[2]})
+		reset=$(_color reset)
 		header="$color$1$reset"
 	fi
 
@@ -488,40 +553,45 @@ cmd_git() {
 cmd_show() {
 	local path="$1"
 	sneaky_path "$path"
-	path=$(match_entry $path)
 
-	local file="$CRYPT_PATH/$path.gpg"
-
-	if [[ -f $file ]]; then
-
-		mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
-		gpg_recipients "$(dirname -- "$path")"
-
-		git_prep "$file"
-
-		tmpdir
-		local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
-
-		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
-
-		local i=$(find_entry "$file")
-		eval "${entries_show[$i]}" "$tmp_file"
-		[[ -f $tmp_file ]] || error "New file not saved."
-
-		$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && return
-
-		while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
-			confirm "GPG encryption failed. Would you like to try again?"
-		done
-		git_track "$file" "Update ${entries_name[$i]} entry $path."
-
-	elif [[ -d $CRYPT_PATH/$path ]]; then
+	if [[ -d $CRYPT_PATH/$path ]]; then
 		[[ -z $path ]] && path="$CRYPT_PATH"
 		cmd_list "$path"
-	elif [[ -z $path ]]; then
-		error "Error: crypt is empty. Try initializing it first."
 	else
-		error "Error: $path is not in the crypt."
+		path=$(check_file $path)
+		[[ $? -eq 0 ]] || exit 1
+
+		local file="$CRYPT_PATH/${path%.gpg}.gpg"
+		echo $path
+
+		if [[ -f $file ]]; then
+			mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
+			gpg_recipients "$(dirname -- "$path")"
+
+			git_prep "$file"
+
+			tmpdir
+			local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
+
+			$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
+
+			find_info "$file"
+
+			eval "$file_show" "$tmp_file"
+			[[ -f $tmp_file ]] || error "New file not saved."
+
+			$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && return
+
+			while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
+				confirm "GPG encryption failed. Would you like to try again?"
+			done
+			git_track "$file" "Update ${entries_name[$i]} entry $path."
+
+		elif [[ -z $path ]]; then
+			error "Error: crypt is empty. Try initializing it first."
+		else
+			error "Error: $path is not in the crypt."
+		fi
 	fi
 }
 
@@ -574,7 +644,7 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-[ -f "$CRYPT_PATH/.entries" ] && entry_load "$CRYPT_PATH/.entries"
+[ -f "$CRYPT_PATH/.entries" ] && load_info "$CRYPT_PATH/.entries"
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
