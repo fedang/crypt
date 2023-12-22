@@ -348,15 +348,15 @@ check_file() {
 }
 
 confirm_file() {
-	local ans="$1"
+	local ans="$1" name="${1##*/}" dir="$(dirname -- "$path")"
 	while true; do
-		#[[ "$ans" == *.gpg ]] && echo "Ambiguous extension!" >&2
 		ans="${ans%.gpg}"
-		find_info "$ans.gpg"
+		find_info "$dir/${ans#$dir}.gpg"
 
-		#printf "%s\n" "$file_entry" >&2
-		[[ ("$file_entry" != "${entries_name[0]}" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "${entries_name[1]}" ]] && echo "$ans" && return
-		# TODO: Make something that given the entry name automatically appends the extension
+		[[ ("$file_entry" != "${entries_name[0]}" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "${entries_name[1]}" && \
+			"$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
+
+		# TODO: Make something that given the entry name automatically appends the extension (and doesn't allow you to change name)
 		read -r -p "Enter a file with a valid extension: " ans
 	done
 }
@@ -445,11 +445,13 @@ _cmd_edit_file() {
 	[[ -f $tmp_file ]] || error "File not saved."
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
-	([[ "$2" == file_show ]] || echo "File unchanged.") && return
+	([[ "$2" != file_edit ]] || echo "File unchanged.") && return
 
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
+
+	# XXX: Sometimes this gets a namespec error, why?
 	git_track "$file" "$action $file_entry entry $path."
 }
 
