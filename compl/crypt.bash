@@ -5,7 +5,7 @@
 _crypt() {
 	COMPREPLY=()
 
-	local location="${CRYPT_LOCATION:-$HOME/.crypt}"
+	local location="${CRYPT_PATH:-$HOME/.crypt}"
 	location="${location%/}/"
 	local cur="${COMP_WORDS[COMP_CWORD]}"
 
