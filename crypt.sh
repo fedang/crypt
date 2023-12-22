@@ -45,7 +45,6 @@ git_prep() {
 	while [[ ! -d $INNER_GIT_DIR && ${INNER_GIT_DIR%/*}/ == "${CRYPT_PATH%/}/"* ]]; do
 		INNER_GIT_DIR="${INNER_GIT_DIR%/*}"
 	done
-
 	[[ $(git -C "$INNER_GIT_DIR" rev-parse --is-inside-work-tree 2>/dev/null) == true ]] || \
 	error "Error: git repository is missing. It seems like crypt was not initialized properly."
 }
@@ -53,7 +52,6 @@ git_prep() {
 git_track() {
 	[[ -n $INNER_GIT_DIR ]] || \
 	error "Error: git repository is missing. It seems like crypt was not initialized properly."
-
 	git -C "$INNER_GIT_DIR" add "$1" || return
 	[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$1") ]] || return
 	git_commit "$2"
@@ -186,15 +184,9 @@ reencrypt_path() {
 	done < <(find "$1" -path '*/.git' -prune -o -name '*.extensions' -prune -o -iname '*.gpg' -print0)
 }
 
-# ENTRIES
+# FILE INFO
 
-# Data for each entry
-# - glob
-# - name
-# - insert action
-# - show action
-# - edit action
-# - color
+# Entries
 entries_glob=()
 entries_name=()
 entries_insert=()
@@ -202,7 +194,7 @@ entries_show=()
 entries_edit=()
 entries_color=()
 
-# DEFAULT TYPE == UNKNOWN
+# Unknown entry
 entries_glob+=( "@unknown" )
 entries_name+=( "unknown" )
 entries_insert+=( "none" )
@@ -210,7 +202,7 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "gray" )
 
-# SPECIAL TYPE == PLAIN
+# Unencrypted entry
 entries_glob+=( "@unencrypted" )
 entries_name+=( "unencrypted !" )
 entries_insert+=( "none" )
@@ -218,7 +210,7 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "white,bold" )
 
-# SPECIAL TYPE == DIRECTORY
+# Directory entry FIXME
 entries_glob+=( "@directory" )
 entries_name+=( "" )
 entries_insert+=( "none" )
@@ -226,17 +218,13 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
-# Data for each rule
-# - glob
-# - entry
-# - color
+# Rules
 rules_glob=()
 rules_entry=()
 rules_color=()
 
-function none() {
-	echo "$(_color red,bold)No action specified$(_color reset)"
-}
+# Undefined action
+function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
 load_info() {
 	while IFS= read -r line; do
@@ -365,7 +353,7 @@ confirm_file() {
 		[[ "$ans" == *.gpg ]] && echo "Ambiguous extension!" >&2
 		find_info "$ans"
 		[[ ("$file_entry" != "unknown" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "unencrypted" ]] && echo "$ans" && return
-		# TODO: Make something that given the entry name automatically appens the extension
+		# TODO: Make something that given the entry name automatically appends the extension
 		read -r -p "Enter a file with a valid extension: " ans
 	done
 }
@@ -376,7 +364,6 @@ SHRED="shred -f -z"
 
 cmd_info() {
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
-		echo "---"
 		echo "Entry #$i"
 		echo "Name: '${entries_name[$i]}'"
 		echo "Glob: '${entries_glob[$i]}'"
@@ -387,11 +374,10 @@ cmd_info() {
 		local reset="" color=""
 		color=$(_color ${entries_color[$i]})
 		[ -z "$color" ] || reset=$(_color reset)
-		printf "Color: '%s%s%s'\n" $color "${entries_color[$i]}" $reset
+		printf "Color: '%s%s%s'\n\n" $color "${entries_color[$i]}" $reset
 	done
 
 	for ((i = 0; i < ${#rules_glob[@]}; i++)); do
-		echo "---"
 		echo "Rule #$i"
 		echo "Glob: '${rules_glob[$i]}'"
 		echo "Entry: '${rules_entry[$i]}'"
@@ -399,7 +385,7 @@ cmd_info() {
 		local reset="" color=""
 		color=$(_color ${rules_color[$i]})
 		[ -z "$color" ] || reset=$(_color reset)
-		printf "Color: '%s%s%s'\n" $color "${rules_color[$i]}" $reset
+		printf "Color: '%s%s%s'\n\n" $color "${rules_color[$i]}" $reset
 	done
 }
 
@@ -432,18 +418,8 @@ cmd_init() {
 }
 
 cmd_insert() {
-	local opts force=0
-	opts="$($GETOPT -o f -l force -n "$PROGRAM" -- "$@")"
-	local err=$?
-	eval set -- "$opts"
-	while true; do
-		case $1 in
-			-f|--force) force=1; shift ;;
-			--)           shift; break ;;
-		esac
-	done
+	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--force,-f] entry"
 
-	[[ $err -ne 0 || $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND [--force,-f] entry"
 	local path="${1%/}"
 	sneaky_path "$path"
 	path=$(confirm_file $path)
@@ -451,12 +427,14 @@ cmd_insert() {
 	local file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
 
-	[[ $force -eq 0 && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
+	[[ -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
 	find_info "$file"
+
+	# TODO: Make function to do the edit boilerplate
 
 	tmpdir
 	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
@@ -503,7 +481,7 @@ cmd_edit() {
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
-	git_track "$file" "$action ${entries_name[$i]} entry $path."
+	git_track "$file" "$action $file_entry entry $path."
 }
 
 
@@ -562,8 +540,6 @@ cmd_show() {
 		[[ $? -eq 0 ]] || exit 1
 
 		local file="$CRYPT_PATH/${path%.gpg}.gpg"
-		echo $path
-
 		if [[ -f $file ]]; then
 			mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 			gpg_recipients "$(dirname -- "$path")"
@@ -585,7 +561,7 @@ cmd_show() {
 			while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 				confirm "GPG encryption failed. Would you like to try again?"
 			done
-			git_track "$file" "Update ${entries_name[$i]} entry $path."
+			git_track "$file" "Update $file_entry entry $path."
 
 		elif [[ -z $path ]]; then
 			error "Error: crypt is empty. Try initializing it first."
