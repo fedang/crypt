@@ -530,20 +530,43 @@ _cmd_list_fmt() {
 }
 
 cmd_list() {
+	local opts plain=0
+	opts="$($GETOPT -o p -l plain -n "$PROGRAM" -- "$@")"
+	local err=$?
+	eval set -- "$opts"
+	while true; do
+		case $1 in
+			-p|--plain) plain=1; shift ;;
+			--)           shift; break ;;
+		esac
+	done
+
 	local path="$CRYPT_PATH/${1#$CRYPT_PATH}"
-	local header="Crypt ($(cd $CRYPT_PATH; dirs +0))"
 
-	if [ -n "$1" ]; then
-		local color="" reset=""
-		# DIR ENTRY 2
-		color=$(_color ${entries_color[2]})
-		reset=$(_color reset)
-		header="$color$1$reset"
+	if [ $plain -eq 0 ]; then
+		local header="Crypt ($(cd $CRYPT_PATH; dirs +0))"
+
+		if [ -n "$1" ]; then
+			local color="" reset=""
+			# DIR ENTRY 2
+			color=$(_color ${entries_color[2]})
+			reset=$(_color reset)
+			header="$color$1$reset"
+		fi
+
+		echo "$header"
+		tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
+		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
+	else
+		local tmp=$(find "$path" -type f -iname '*.gpg' | sed -e "s~^$path\/*~~" | sort | \
+			while IFS='' read -r line; do find_info "$line"; echo "${line%.gpg} $file_entry ${line%$file_glob.gpg}"; done)
+
+		local reps=$(echo "$tmp" | uniq -D -f 2)
+
+		# XXX: Highly inefficient...
+		echo "$tmp" | comm -23 - <(echo "$reps") | awk '{print $3" "$2}'
+		echo "$reps" | awk '{print $1" "$2}'
 	fi
-
-	echo "$header"
-	tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
-	column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 }
 
 cmd_git() {
@@ -650,7 +673,7 @@ cmd_help() {
 		    $PROGRAM edit file
 		        Edit the file using the entry's associated edit_action
 
-		    $PROGRAM list
+		    $PROGRAM list [--plain]
 		        List the crypt structure, associating each file to its entry name
 
 		    $PROGRAM info
