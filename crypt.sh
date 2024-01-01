@@ -651,17 +651,48 @@ cmd_grep() {
 }
 
 cmd_verify() {
+	local opts sign=0
+	opts="$($GETOPT -o s -l sign -n "$PROGRAM" -- "$@")"
+	local err=$?
+	eval set -- "$opts"
+	while true; do case $1 in
+		-s|--sign) sign=1; shift ;;
+		--) shift; break ;;
+	esac done
+
 	# TODO: Verify all the signatures in the crypt
-	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [file]" Usage
+	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--sign] [file]" Usage
 	[[ -n $CRYPT_SIGNING_KEY ]] || error "No signing key was specified!"
 
+	local to_verify=()
+
+	if [[ $# -eq 1 ]]; then
+		# XXX: What if we don't wanna load them?
+		load_entries "$CRYPT_PATH/.entries"
+
+		local path="${1%/}"
+		check_paths "$path"
+		path="$CRYPT_PATH/$(check_file "$path" noask)"
+		[[ $? -ne 0 || -z $path ]] && exit 1
+
+		# Handle .gpg extension
+		[ -f "$path" ] || path="$path.gpg"
+		[ -f "$path" ] || error "$1 not found in crypt."
+
+		if [[ $sign -eq 1 ]]; then
+			printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
+			gpg_sign "$path"
+			return
+		else
+			to_verify+=( "$path" )
+		fi
+	else
+		readarray -t to_verify < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/*.sig" -print)
+	fi
+
 	printf "Verifying signatures for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
-
-	[[ $# -eq 1 ]] && gpg_verify "$1" && return
-
-	for f in ".gpg-id" ".entries"; do
-		echo "Checking signature for $f:"
-		gpg_verify "$CRYPT_PATH/$f" && echo "$(_color green)Valid$(_color reset)"
+	for f in "${to_verify[@]}"; do
+		gpg_verify "${f%.sig}" && echo "${f#$CRYPT_PATH/}: $(_color green)Valid$(_color reset)"
 	done
 }
 
@@ -689,8 +720,8 @@ cmd_help() {
 		    $PROGRAM info
 		        List the crypt registered entries
 
-		    $PROGRAM verify [file]
-		        Verify the signature associated with a file or the crypt
+		    $PROGRAM verify [--sign] [file]
+				Verify the signature of (or sign) a file or the whole crypt
 
 		    $PROGRAM git git-args...
 		        Run git commands
