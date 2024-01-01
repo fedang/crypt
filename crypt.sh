@@ -204,6 +204,7 @@ reencrypt_path() {
 
 # Entries
 entries_glob=()
+entries_ext=()
 entries_name=()
 entries_insert=()
 entries_show=()
@@ -212,6 +213,7 @@ entries_color=()
 
 # Unknown entry @unknown
 entries_glob+=( "" )
+entries_ext+=( "" )
 entries_name+=( "unknown" )
 entries_insert+=( "none" )
 entries_show+=( "none" )
@@ -220,6 +222,7 @@ entries_color+=( "gray" )
 
 # Unencrypted entry
 entries_glob+=( "@unencrypted" )
+entries_ext+=( "" )
 entries_name+=( "unencrypted !" )
 entries_insert+=( "none" )
 entries_show+=( "none" )
@@ -228,16 +231,12 @@ entries_color+=( "white,bold" )
 
 # Directory entry FIXME
 entries_glob+=( "@directory" )
+entries_ext+=( "" )
 entries_name+=( "" )
 entries_insert+=( "none" )
 entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
-
-# Rules
-rules_glob=()
-rules_entry=()
-rules_color=()
 
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
@@ -259,21 +258,11 @@ load_entries() {
 			\@unencrypted) i=1 ;;
 			\@directory) i=2 ;;
 			\@entry) i="${#entries_glob[@]}" ;;
-			*)	# RULES
-				i="${#rules_glob[@]}";
-				rules_glob[$i]="${arr[0]}";
-				rules_entry[$i]=0
-				for ((j = 3; j < ${#entries_name[@]}; j++)); do
-					if [[ "${opts[entry]}" == ${entries_name[j]} ]]; then
-						rules_entry[$i]=$j
-					fi
-				done
-				rules_color[$i]="${opts[color]}"
-				continue
-				;;
+			*) error "Unexpected entry" ;;
 		esac
 
 		entries_glob[$i]="*.${opts[extension]}"
+		entries_ext[$i]="${opts[extension]}"
 		entries_name[$i]="${opts[name]}"
 		entries_insert[$i]="${opts[insert_action]}"
 		entries_show[$i]="${opts[show_action]}"
@@ -290,16 +279,6 @@ load_entries() {
 }
 
 find_entry() {
-	# Current file info
-	file_glob=""
-	file_entry=""
-	file_insert=""
-	file_show=""
-	file_edit=""
-	file_color1=""
-	file_color2=""
-
-	# Find entry
 	local path="${1#$CRYPT_PATH/}" entry=0
 	if [ -d "$CRYPT_PATH/$path" ]; then
 		entry=2
@@ -313,36 +292,7 @@ find_entry() {
 			fi
 		done
 	fi
-
-	file_glob=${entries_glob[$entry]}
-	file_entry=${entries_name[$entry]}
-	file_insert=${entries_insert[$entry]}
-	file_show=${entries_show[$entry]}
-	file_edit=${entries_edit[$entry]}
-
-	# TODO: Fix ad hoc handling
-	if [ $entry -eq 2 ]; then
-		file_color1=${entries_color[$entry]}
-		return
-	else
-		file_color2=${entries_color[$entry]}
-	fi
-
-	# Find rules
-	for ((i = 0; i < ${#rules_glob[@]}; i++)); do
-		if [[ "${path%.gpg}" == ${rules_glob[$i]} ]]; then
-			if [[ ${rules_entry[$i]} -ne 0 ]]; then
-				entry=${rules_entry[$i]}
-				file_glob=${rules_glob[$entry]}
-				file_entry=${entries_name[$entry]}
-				file_insert=${entries_insert[$entry]}
-				file_show=${entries_show[$entry]}
-				file_edit=${entries_edit[$entry]}
-				file_color2=${entries_color[$entry]}
-			fi
-			file_color1=${rules_color[$i]}
-		fi
-	done
+	echo "$entry"
 }
 
 check_file() {
@@ -367,10 +317,9 @@ confirm_file() {
 	local ans="$1" name="${1##*/}" dir="$(dirname -- "$path")"
 	while true; do
 		ans="${ans%.gpg}"
-		find_entry "$dir/${ans#$dir}.gpg"
+		local entry=$(find_entry "$dir/${ans#$dir}.gpg")
 
-		[[ ("$file_entry" != "${entries_name[0]}" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "${entries_name[1]}" && \
-			"$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
+		[[ ($entry -ne 0 || ${#entries_glob[@]} -eq 3) && $entry -ne 1 && "$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
 
 		# TODO: Make something that given the entry name automatically appends the extension (and doesn't allow you to change name)
 		read -r -p "Enter a file with a valid extension: " ans
@@ -386,6 +335,7 @@ cmd_info() {
 		echo "Entry #$i"
 		echo "Name: '${entries_name[$i]}'"
 		echo "Glob: '${entries_glob[$i]}'"
+		echo "Ext: '${entries_ext[$i]}'"
 		echo "Edit: '${entries_edit[$i]}'"
 		echo "Show: '${entries_show[$i]}'"
 		echo "Insert: '${entries_insert[$i]}'"
@@ -396,16 +346,7 @@ cmd_info() {
 		printf "Color: '%s%s%s'\n\n" $color "${entries_color[$i]}" $reset
 	done
 
-	for ((i = 0; i < ${#rules_glob[@]}; i++)); do
-		echo "Rule #$i"
-		echo "Glob: '${rules_glob[$i]}'"
-		echo "Entry: '${rules_entry[$i]}'"
-
-		local reset="" color=""
-		color=$(_color ${rules_color[$i]})
-		[ -z "$color" ] || reset=$(_color reset)
-		printf "Color: '%s%s%s'\n\n" $color "${rules_color[$i]}" $reset
-	done
+	echo "${#entries_name[@]} entries in $(cd $CRYPT_PATH; dirs +0)/.entries"
 }
 
 cmd_init() {
@@ -441,34 +382,41 @@ _cmd_edit_file() {
 	git_prep "$file"
 
 	[[ -d $file ]] && error "Path is a directory"
-	[[ "$2" == file_insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
+	[[ "$2" == insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	find_entry "$file"
+	local entry=$(find_entry "$file")
 
 	make_tmpdir
-	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
+	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
 
-	local action="Insert"
-	if [[ -f $file && "$2" != file_insert ]]; then
+	local what="Insert"
+	if [[ -f $file && "$2" != insert ]]; then
 		$GPG -d -o "$tmp_file" "${GPG_OPTS[@]}" "$file" || exit 1
-		action="Update"
+		what="Update"
 	fi
 
-	eval "${!2}" "$tmp_file"
+	local action=none
+	case $2 in
+		insert) action="${entries_insert[$entry]}" ;;
+		edit) action="${entries_edit[$entry]}" ;;
+		show) action="${entries_show[$entry]}" ;;
+	esac
+
+	eval "$action" "$tmp_file"
 	[[ -f $tmp_file ]] || error "File not saved."
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
-	([[ "$2" != file_edit ]] || echo "File unchanged.") && return
+	([[ "$2" != edit ]] || echo "File unchanged.") && return
 
 	while ! $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" "$tmp_file"; do
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
 
 	# XXX: Sometimes this gets a namespec error, why?
-	git_track "$file" "$action $file_entry entry $path."
+	git_track "$file" "$what ${entries_name[$entry]} entry $path."
 }
 
 
@@ -478,7 +426,7 @@ cmd_insert() {
 	local path="${1%/}"
 	check_paths "$path"
 	path=$(confirm_file "$path")
-	_cmd_edit_file "$path" file_insert
+	_cmd_edit_file "$path" insert
 }
 
 # TODO: Handle unencrypted files
@@ -488,7 +436,7 @@ cmd_edit() {
 	local path="${1%/}"
 	check_paths "$path"
 	path=$(check_file "$path")
-	_cmd_edit_file "$path" file_edit
+	_cmd_edit_file "$path" edit
 }
 
 cmd_remove() {
@@ -530,19 +478,23 @@ _cmd_list_fmt() {
 	local path=${tmp[-1]}
 
 	local name="$(basename -- "$path")"
-	find_entry "$path"
+	local entry=$(find_entry "$path") entry_name=""
 
 	# FIXME: color1 screws up in the tree view sometimes
-	local color1="$(_color "$file_color1")" reset1=""
-	[ -z "$file_color1" ] || reset1="$(_color reset)"
-
-	local color2="$(_color "$file_color2")" reset2=""
-	[ -z "$file_color2" ] || reset2="$(_color reset)"
+	local color1="" reset1="" color2="" reset2=""
+	if [ $entry -eq 2 ]; then
+		color1="$(_color "${entries_color[$entry]}")"
+		[ -z "${entries_color[$entry]}" ] || reset1="$(_color reset)"
+	else
+		color2="$(_color "${entries_color[$entry]}")"
+		[ -z "${entries_color[$entry]}" ] || reset2="$(_color reset)"
+		entry_name="${entries_name[$entry]}"
+	fi
 
 	local tmp=${name%$file_glob}
 	[ -z tmp ] || name=$tmp
 
-	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$file_entry$reset2~" <<< "$@"
+	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry_name$reset2~" <<< "$@"
 }
 
 cmd_list() {
@@ -575,7 +527,7 @@ cmd_list() {
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
 		local tmp=$(find "$path" -type f -iname '*.gpg' | sed -e "s~^$path\/*~~" | sort | \
-			while IFS='' read -r line; do find_entry "$line"; echo "${line%.gpg} $file_entry ${line%$file_glob.gpg}"; done)
+			while IFS='' read -r line; do local i=$(find_entry "$line"); echo "${line%.gpg} ${entries_name[$i]} ${line%.${entries_ext[$i]}.gpg}"; done)
 
 		local reps=$(echo "$tmp" | uniq -D -f 2)
 
@@ -608,7 +560,7 @@ cmd_show() {
 		if [[ -z "$path" ]]; then
 			error "$1 not found in the crypt"
 		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
-			_cmd_edit_file "$path" file_show
+			_cmd_edit_file "$path" show
 		else
 			error "Try to initialize the crypt"
 		fi
