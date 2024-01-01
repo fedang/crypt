@@ -42,7 +42,7 @@ _color() {
 }
 
 error() {
-	echo "$@" >&2
+	echo "$(_color red,bold)${2:-Error}$(_color reset): $1" >&2
 	exit 1
 }
 
@@ -53,15 +53,15 @@ confirm() {
 	[[ $ans == [yY] ]] || exit 1
 }
 
-sneaky_path() {
+check_paths() {
 	local path
 	for path in "$@"; do
 		[[ $path =~ /\.\.$ || $path =~ ^\.\./ || $path =~ /\.\./ || $path =~ ^\.\.$ ]] \
-		&& error "Error: You have passed a sneaky path..."
+		&& error "You have passed a sneaky path..."
 	done
 }
 
-tmpdir() {
+make_tmpdir() {
 	[[ -n $SECURE_TMPDIR ]] && return
 	local template="$PROGRAM.XXXXXXXXXXXXX"
 	if [[ -d /dev/shm && -w /dev/shm && -x /dev/shm ]]; then
@@ -101,16 +101,14 @@ git_prep() {
 }
 
 git_track() {
-	[[ -n $INNER_GIT_DIR ]] || \
-	error "Error: git repository is missing. It seems like crypt was not initialized properly."
+	[[ -n $INNER_GIT_DIR ]] || error "git repository is missing. Try to reinitialize the crypt."
 	git -C "$INNER_GIT_DIR" add "$1" || return
 	[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$1") ]] || return
 	git_commit "$2"
 }
 
 git_commit() {
-	[[ -n $INNER_GIT_DIR ]] || \
-	error "Error: git repository is missing. It seems like crypt was not initialized properly."
+	[[ -n $INNER_GIT_DIR ]] || error "git repository is missing. Try to reinitialize the crypt."
 	git -C "$INNER_GIT_DIR" commit -m "$1"
 }
 
@@ -123,7 +121,7 @@ git_init() {
 	git_track '.gitattributes' "Configure git for gpg file diff."
 
 	touch "$CRYPT_PATH/.entries"
-	git_track '.entries' "Add .entries file."
+	git_track '.entries' "Add \`.entries\` file."
 
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.binary true
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.textconv "$GPG -d ${GPG_OPTS[*]}"
@@ -155,7 +153,7 @@ gpg_recipients() {
 	current="$current/.gpg-id"
 
 	[[ ! -f $current ]] && \
-	error "Error: gpg-id is missing. It seems like crypt was not initialized properly."
+	error "gpg-id is missing. Try to reinitialize the crypt."
 
 	local gpg_id
 	while read -r gpg_id; do
@@ -244,7 +242,7 @@ rules_color=()
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
-load_info() {
+load_entries() {
 	while IFS= read -r line; do
 		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
 		declare -A opts=( ["name"]="none" ["edit_action"]="none" ["insert_action"]="none" ["show_action"]="none" ["color"]="none" ["entry"]="none" )
@@ -291,7 +289,7 @@ load_info() {
 		-e 's/[[:space:]]*$//g')
 }
 
-find_info() {
+find_entry() {
 	# Current file info
 	file_glob=""
 	file_entry=""
@@ -369,7 +367,7 @@ confirm_file() {
 	local ans="$1" name="${1##*/}" dir="$(dirname -- "$path")"
 	while true; do
 		ans="${ans%.gpg}"
-		find_info "$dir/${ans#$dir}.gpg"
+		find_entry "$dir/${ans#$dir}.gpg"
 
 		[[ ("$file_entry" != "${entries_name[0]}" || ${#entries_glob[@]} -eq 3) && "$file_entry" != "${entries_name[1]}" && \
 			"$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
@@ -411,7 +409,7 @@ cmd_info() {
 }
 
 cmd_init() {
-	[[ $# -lt 1 ]] && error "Usage: $PROGRAM $COMMAND gpg-id..."
+	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND gpg-id..." Usage
 
 	mkdir -v -p "$CRYPT_PATH/"
 	git_init
@@ -421,7 +419,7 @@ cmd_init() {
 
 	if [[ $# -eq 1 && -z $1 ]]; then
 		[[ ! -f "$gpg_id" ]] && \
-		error "Error: $gpg_id does not exist and therefore it cannot be removed."
+		error "$gpg_id does not exist and therefore it cannot be removed."
 
 		rm -v -f "$gpg_id" || exit 1
 		git -C "$INNER_GIT_DIR" rm -qr "$gpg_id"
@@ -442,15 +440,15 @@ _cmd_edit_file() {
 	local path="$1" file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
 
-	[[ -d $file ]] && error "Error: Path is a directory"
+	[[ -d $file ]] && error "Path is a directory"
 	[[ "$2" == file_insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
 
-	find_info "$file"
+	find_entry "$file"
 
-	tmpdir
+	make_tmpdir
 	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
 
 	local action="Insert"
@@ -475,20 +473,20 @@ _cmd_edit_file() {
 
 
 cmd_insert() {
-	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND entry"
+	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND entry" Usage
 
 	local path="${1%/}"
-	sneaky_path "$path"
+	check_paths "$path"
 	path=$(confirm_file "$path")
 	_cmd_edit_file "$path" file_insert
 }
 
 # TODO: Handle unencrypted files
 cmd_edit() {
-	[[ $# -ne 1 ]] && error "Usage: $PROGRAM $COMMAND file"
+	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND file" Usage
 
 	local path="${1%/}"
-	sneaky_path "$path"
+	check_paths "$path"
 	path=$(check_file "$path")
 	_cmd_edit_file "$path" file_edit
 }
@@ -504,15 +502,15 @@ cmd_remove() {
 		--) shift; break ;;
 	esac done
 
-	[[ $# -ne 1 ]] && die "Usage: $PROGRAM $COMMAND [--recursive,-r] [--force,-f] pass-name"
+	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND [--recursive,-r] [--force,-f] pass-name" Usage
 	local path="$1"
-	sneaky_path "$path"
+	check_paths "$path"
 
 	local dir="$CRYPT_PATH/${path%/}"
 	local file="$CRYPT_PATH/$path.gpg"
 
 	[[ -f $file && -d $dir && $path == */ || ! -f $file ]] && file="${dir%/}/"
-	[[ -e $file ]] || error "Error: $path is not in the password store."
+	[[ -e $file ]] || error "$path is not in the password store."
 	git_prep "$file"
 
 	[[ $force -eq 1 ]] || confirm "Are you sure you would like to delete $path?"
@@ -532,7 +530,7 @@ _cmd_list_fmt() {
 	local path=${tmp[-1]}
 
 	local name="$(basename -- "$path")"
-	find_info "$path"
+	find_entry "$path"
 
 	# FIXME: color1 screws up in the tree view sometimes
 	local color1="$(_color "$file_color1")" reset1=""
@@ -577,7 +575,7 @@ cmd_list() {
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
 		local tmp=$(find "$path" -type f -iname '*.gpg' | sed -e "s~^$path\/*~~" | sort | \
-			while IFS='' read -r line; do find_info "$line"; echo "${line%.gpg} $file_entry ${line%$file_glob.gpg}"; done)
+			while IFS='' read -r line; do find_entry "$line"; echo "${line%.gpg} $file_entry ${line%$file_glob.gpg}"; done)
 
 		local reps=$(echo "$tmp" | uniq -D -f 2)
 
@@ -589,17 +587,15 @@ cmd_list() {
 
 cmd_git() {
 	git_prep "$CRYPT_PATH/"
-	[[ -n $INNER_GIT_DIR ]] || \
-	error "Error: git repository is missing. It seems like crypt was not initialized properly."
-
-	tmpdir nowarn
+	[[ -n $INNER_GIT_DIR ]] || error "git repository is missing. Try to reinitialize the crypt."
+	make_tmpdir nowarn
 	export TMPDIR="$SECURE_TMPDIR"
 	git -C "$INNER_GIT_DIR" "$@"
 }
 
 cmd_show() {
 	local path="$1"
-	sneaky_path "$path"
+	check_paths "$path"
 
 	if [[ -d $CRYPT_PATH/$path ]]; then
 		[[ -z $path ]] && path="$CRYPT_PATH"
@@ -610,25 +606,19 @@ cmd_show() {
 		[[ $? -eq 0 ]] || exit 1
 
 		if [[ -z "$path" ]]; then
-			error "Error: $1 not found in the crypt."
+			error "$1 not found in the crypt"
 		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
 			_cmd_edit_file "$path" file_show
 		else
-			error "Error: Try to initialize the crypt."
+			error "Try to initialize the crypt"
 		fi
 	fi
 }
 
-cmd_maybe_show() {
-	# TODO: Alternatives
-	COMMAND="show"
-	cmd_show "$@"
-}
-
 cmd_copy_move() {
-	[[ $# -ne 2 ]] && die "Usage: $PROGRAM $COMMAND old-path new-path"
+	[[ $# -ne 2 ]] && error "$PROGRAM $COMMAND old-path new-path" Usage
 
-	sneaky_path "$1" "$2"
+	check_paths "$1" "$2"
 	local old_path="$CRYPT_PATH/${1%/}"
 	old_path="${old_path%.gpg}"
 	local old_dir="$old_path"
@@ -640,7 +630,7 @@ cmd_copy_move() {
 		old_dir="${old_path%/*}"
 		old_path="${old_path}.gpg"
 	fi
-	[[ -e $old_path ]] || error "Error: $1 is not in the password store."
+	[[ -e $old_path ]] || error "$1 is not in the password store."
 
 	mkdir -p -v "${new_path%/*}"
 	[[ -d $old_path || -d $new_path || $new_path == */ ]] || new_path="${new_path}.gpg"
@@ -674,7 +664,7 @@ cmd_copy_move() {
 }
 
 cmd_grep() {
-	[[ $# -lt 1 ]] && die "Usage: $PROGRAM $COMMAND [GREPOPTIONS] search-string"
+	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND [GREPOPTIONS] search-string" Usage
 	local file results
 	while read -r -d "" file; do
 		results="$($GPG -d "${GPG_OPTS[@]}" "$file" | grep --color=always "$@")"
@@ -738,12 +728,17 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-# TODO: Make a serious crypt structure
-[ -f "$CRYPT_PATH/.entries" ] && load_info "$CRYPT_PATH/.entries"
+[ "$COMMAND" != init ] && load_entries "$CRYPT_PATH/.entries"
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
 	version|--version) shift; cmd_version "$@" ;;
+
+	# IDEA FOR CLOSE AND OPEN
+	# basically when you open the crypt (which is a tar.gz.gpg) a ramfs/tmpfs is created and the
+	# archive is put there, then it mounted to the crypt path, and modification are only in memory
+	# then when you close the thing is closed and created an updated archive
+	# maybe it is not needed since everything is encrypted. idk
 
 	#close|lock) ;;
 	#open|unlock) ;;
@@ -760,6 +755,6 @@ case "$COMMAND" in
 	move|mv) shift; cmd_copy_move "$@" ;;
 	copy|cp) shift; cmd_copy_move "$@" ;;
 	remove|rm) shift; cmd_remove "$@" ;;
-	*) cmd_maybe_show "$@" ;;
+	*) cmd_show "$@" ;;
 esac
 exit 0
