@@ -300,7 +300,6 @@ check_file() {
 		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_ext[$i]}.gpg" -print)
 	done
 
-	#printf "%q\n" "${matches[@]}" >&2
 	case ${#matches[@]} in
 		0) [[ "$2" == "noask" ]] || confirm_file "$path" ;;
 		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
@@ -309,15 +308,22 @@ check_file() {
 }
 
 confirm_file() {
-	local ans="$1" name="${1##*/}" dir="$(dirname -- "$path")"
+	local entry=$(find_entry "${1%.gpg}.gpg") ans=""
+
+	[[ ($entry -eq 0 && ${#entries_ext[@]} -eq 3) || $entry -eq 1 ]] && echo "$1" && return
+
 	while true; do
-		ans="${ans%.gpg}"
-		local entry=$(find_entry "$dir/${ans#$dir}.gpg")
+		for ((i = 3; i < ${#entries_name[@]}; i++)); do
+			echo "${entries_ext[$i]}) $(_color ${entries_color[$i]})${entries_name[$i]}$(_color reset)" >&2
+		done
+		read -r -p "Select one of the valid entries: " ans
 
-		[[ ($entry -ne 0 || ${#entries_ext[@]} -eq 3) && $entry -ne 1 && "$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
-
-		# TODO: Make something that given the entry name automatically appends the extension (and doesn't allow you to change name)
-		read -r -p "Enter a file with a valid extension: " ans
+		for ((i = 3; i < ${#entries_name[@]}; i++)); do
+			if [[ "$ans" == "${entries_ext[$i]}" || "$ans" == "${entries_name[$i]}" ]]; then
+				echo "${1%.}.$ans"
+				return
+			fi
+		done
 	done
 }
 
