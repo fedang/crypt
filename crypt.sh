@@ -260,7 +260,14 @@ entries_color+=( "blue,bold" )
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
 load_entries() {
+	warn_entries() {
+		printf "\n%s\n%s\n" \
+			"If you have changed the .entries file yourself, you also need to update its signature." \
+			"$(_color bold)Otherwise, you must check the .entries file as it is probably corrupted.$(_color reset)" >&2
+	}
+	trap warn_entries EXIT
 	gpg_verify "$1"
+	trap - EXIT
 
 	while IFS= read -r line; do
 		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
@@ -667,21 +674,23 @@ cmd_verify() {
 	local to_verify=()
 
 	if [[ $# -eq 1 ]]; then
-		# XXX: What if we don't wanna load them?
-		load_entries "$CRYPT_PATH/.entries"
-
-		local path="${1%/}"
+		local path="$CRYPT_PATH/${1%/}"
 		check_paths "$path"
-		path="$CRYPT_PATH/$(check_file "$path" noask)"
-		[[ $? -ne 0 || -z $path ]] && exit 1
-
-		# Handle .gpg extension
 		[ -f "$path" ] || path="$path.gpg"
-		[ -f "$path" ] || error "$1 not found in crypt."
+
+		# If it fails, try loading .entries
+		if [ ! -f "$path" ]; then
+			load_entries "$CRYPT_PATH/.entries"
+			path="$CRYPT_PATH/$(check_file "$path" noask)"
+			[[ $? -ne 0 || -z $path ]] && exit 1
+			[ -f "$path" ] || path="$path.gpg"
+			[ -f "$path" ] || error "$1 not found in crypt."
+		fi
 
 		if [[ $sign -eq 1 ]]; then
 			printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
 			gpg_sign "$path"
+			echo "$(_color green)$1 signed successfully$(_color reset)"
 			return
 		else
 			to_verify+=( "$path" )
