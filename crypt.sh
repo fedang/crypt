@@ -226,7 +226,7 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "white,bold" )
 
-# Directory entry FIXME
+# Directory entry
 entries_ext+=( "" )
 entries_name+=( "" )
 entries_insert+=( "none" )
@@ -291,13 +291,12 @@ find_entry() {
 }
 
 check_file() {
-	# Expects a non-directory path
 	local path="${1#$CRYPT_PATH/}"
 	[[ -f "$CRYPT_PATH/$path.gpg" ]] && echo "$path" && return
 
 	local matches=()
 	for ((i = 3; i < ${#entries_name[@]}; i++)); do
-		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_ext[$i]}.gpg" -print)
+		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}.${entries_ext[$i]}.gpg" -print)
 	done
 
 	case ${#matches[@]} in
@@ -309,7 +308,6 @@ check_file() {
 
 confirm_file() {
 	local entry=$(find_entry "${1%.gpg}.gpg") ans=""
-
 	[[ ($entry -eq 0 && ${#entries_ext[@]} -eq 3) || $entry -eq 1 ]] && echo "$1" && return
 
 	while true; do
@@ -317,7 +315,6 @@ confirm_file() {
 			echo "${entries_ext[$i]}) $(_color ${entries_color[$i]})${entries_name[$i]}$(_color reset)" >&2
 		done
 		read -r -p "Select one of the valid entries: " ans
-
 		for ((i = 3; i < ${#entries_name[@]}; i++)); do
 			if [[ "$ans" == "${entries_ext[$i]}" || "$ans" == "${entries_name[$i]}" ]]; then
 				echo "${1%.}.$ans"
