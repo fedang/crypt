@@ -203,7 +203,6 @@ reencrypt_path() {
 # FILE INFO
 
 # Entries
-entries_glob=()
 entries_ext=()
 entries_name=()
 entries_insert=()
@@ -212,7 +211,6 @@ entries_edit=()
 entries_color=()
 
 # Unknown entry @unknown
-entries_glob+=( "" )
 entries_ext+=( "" )
 entries_name+=( "unknown" )
 entries_insert+=( "none" )
@@ -221,7 +219,6 @@ entries_edit+=( "none" )
 entries_color+=( "gray" )
 
 # Unencrypted entry
-entries_glob+=( "@unencrypted" )
 entries_ext+=( "" )
 entries_name+=( "unencrypted !" )
 entries_insert+=( "none" )
@@ -230,7 +227,6 @@ entries_edit+=( "none" )
 entries_color+=( "white,bold" )
 
 # Directory entry FIXME
-entries_glob+=( "@directory" )
 entries_ext+=( "" )
 entries_name+=( "" )
 entries_insert+=( "none" )
@@ -257,11 +253,10 @@ load_entries() {
 			\@unknown) i=0 ;;
 			\@unencrypted) i=1 ;;
 			\@directory) i=2 ;;
-			\@entry) i="${#entries_glob[@]}" ;;
+			\@entry) i="${#entries_name[@]}" ;;
 			*) error "Unexpected entry" ;;
 		esac
 
-		entries_glob[$i]="*.${opts[extension]}"
 		entries_ext[$i]="${opts[extension]}"
 		entries_name[$i]="${opts[name]}"
 		entries_insert[$i]="${opts[insert_action]}"
@@ -285,8 +280,8 @@ find_entry() {
 	elif [[ "$path" != *.gpg ]]; then
 		entry=1
 	else
-		for ((i = 3; i < ${#entries_glob[@]}; i++)); do
-			if [[ "${path%.gpg}" == ${entries_glob[$i]} ]]; then
+		for ((i = 3; i < ${#entries_ext[@]}; i++)); do
+			if [[ "${path%.gpg}" == *.${entries_ext[$i]} ]]; then
 				entry=$i
 				break
 			fi
@@ -301,8 +296,8 @@ check_file() {
 	[[ -f "$CRYPT_PATH/$path.gpg" ]] && echo "$path" && return
 
 	local matches=()
-	for ((i = 3; i < ${#entries_glob[@]}; i++)); do
-		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_glob[$i]}.gpg" -print)
+	for ((i = 3; i < ${#entries_name[@]}; i++)); do
+		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}${entries_ext[$i]}.gpg" -print)
 	done
 
 	#printf "%q\n" "${matches[@]}" >&2
@@ -319,7 +314,7 @@ confirm_file() {
 		ans="${ans%.gpg}"
 		local entry=$(find_entry "$dir/${ans#$dir}.gpg")
 
-		[[ ($entry -ne 0 || ${#entries_glob[@]} -eq 3) && $entry -ne 1 && "$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
+		[[ ($entry -ne 0 || ${#entries_ext[@]} -eq 3) && $entry -ne 1 && "$ans" =~ ($dir/)?($name.*) ]] && echo "$dir/${BASH_REMATCH[2]}" && return
 
 		# TODO: Make something that given the entry name automatically appends the extension (and doesn't allow you to change name)
 		read -r -p "Enter a file with a valid extension: " ans
@@ -334,7 +329,6 @@ cmd_info() {
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
 		echo "Entry #$i"
 		echo "Name: '${entries_name[$i]}'"
-		echo "Glob: '${entries_glob[$i]}'"
 		echo "Ext: '${entries_ext[$i]}'"
 		echo "Edit: '${entries_edit[$i]}'"
 		echo "Show: '${entries_show[$i]}'"
@@ -491,7 +485,7 @@ _cmd_list_fmt() {
 		entry_name="${entries_name[$entry]}"
 	fi
 
-	local tmp=${name%$file_glob}
+	local tmp=${name%*.${entries_ext[$entry]}}
 	[ -z tmp ] || name=$tmp
 
 	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry_name$reset2~" <<< "$@"
