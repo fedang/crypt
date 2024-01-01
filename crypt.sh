@@ -136,14 +136,26 @@ command -v gpg2 &>/dev/null && GPG="gpg2"
 
 gpg_verify() {
 	[[ -n $CRYPT_SIGNING_KEY ]] || return 0
-	[[ -f $1.sig ]] || error "Signature for $1 does not exist."
+	[[ -f $1.sig ]] || error "Signature for ${1#$CRYPT_PATH/} does not exist."
 	local fingerprints="$($GPG $CRYPT_GPG_OPTS --verify --status-fd=1 "$1.sig" "$1" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG \([A-F0-9]\{40\}\) .* \([A-F0-9]\{40\}\)$/\1\n\2/p')"
 	local fingerprint found=0
 	for fingerprint in $CRYPT_SIGNING_KEY; do
 		[[ $fingerprint =~ ^[A-F0-9]{40}$ ]] || continue
 		[[ $fingerprints == *$fingerprint* ]] && { found=1; break; }
 	done
-	[[ $found -eq 1 ]] || error "Signature for $1 is invalid."
+	[[ $found -eq 1 ]] || error "Signature for ${1#$CRYPT_PATH/} is invalid."
+}
+
+gpg_sign() {
+	[[ -n $CRYPT_SIGNING_KEY ]] || return 1
+	local signing_keys=( ) key
+	for key in $CRYPT_SIGNING_KEY; do
+		signing_keys+=( --default-key $key )
+	done
+
+	$GPG "${GPG_OPTS[@]}" "${signing_keys[@]}" --detach-sign "$1" || error "Could not sign ${1#$CRYPT_PATH/}."
+	key="$($GPG "${GPG_OPTS[@]}" --verify --status-fd=1 "$1.sig" "$1" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG [A-F0-9]\{40\} .* \([A-F0-9]\{40\}\)$/\1/p')"
+	[[ -n $key ]] || error "Signing of ${1#$CRYPT_PATH/} unsuccessful."
 }
 
 gpg_recipients() {
@@ -261,12 +273,11 @@ load_entries() {
 		done
 
 		local i
-		case "${arr[0]}" in
+		case "${opts[extension]}" in
 			\@unknown) i=0 ;;
 			\@unencrypted) i=1 ;;
 			\@directory) i=2 ;;
-			\@entry) i="${#entries_name[@]}" ;;
-			*) error "Unexpected entry" ;;
+			*) i="${#entries_name[@]}" ;;
 		esac
 
 		entries_ext[$i]="${opts[extension]}"
@@ -380,23 +391,9 @@ cmd_init() {
 		echo "Crypt initialized for ${id_print%, }"
 		git_track "$gpg_id" "Set GPG id to ${id_print%, }."
 
-		if [[ -n $CRYPT_SIGNING_KEY ]]; then
-			local signing_keys=( ) key
-			for key in $CRYPT_SIGNING_KEY; do
-				signing_keys+=( --default-key $key )
-			done
-
-			$GPG "${GPG_OPTS[@]}" "${signing_keys[@]}" --detach-sign "$gpg_id" || error "Could not sign .gpg_id."
-			key="$($GPG "${GPG_OPTS[@]}" --verify --status-fd=1 "$gpg_id.sig" "$gpg_id" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG [A-F0-9]\{40\} .* \([A-F0-9]\{40\}\)$/\1/p')"
-			[[ -n $key ]] || error "Signing of .gpg_id unsuccessful."
-			git_track "$gpg_id.sig" "Signing new GPG id with ${key//[$IFS]/,}."
-
-			local entries="$CRYPT_PATH/.entries"
-			$GPG "${GPG_OPTS[@]}" "${signing_keys[@]}" --detach-sign "$entries" || error "Could not sign .entries."
-			key="$($GPG "${GPG_OPTS[@]}" --verify --status-fd=1 "$entries.sig" "$entries" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG [A-F0-9]\{40\} .* \([A-F0-9]\{40\}\)$/\1/p')"
-			[[ -n $key ]] || error "Signing of .entries unsuccessful."
-			git_track "$entries.sig" "Signing .entries with ${key//[$IFS]/,}."
-		fi
+		gpg_sign "$gpg_id" && git_track "$gpg_id.sig" "Signing new GPG id with ${key//[$IFS]/,}."
+		local entries="$CRYPT_PATH/.entries"
+		gpg_sign "$entries" && git_track "$entries.sig" "Signing .entries with ${key//[$IFS]/,}."
 	fi
 
 	reencrypt_path "$CRYPT_PATH/"
