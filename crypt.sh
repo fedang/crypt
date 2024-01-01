@@ -134,6 +134,18 @@ export GPG_TTY="${GPG_TTY:-$(tty 2>/dev/null)}"
 command -v gpg2 &>/dev/null && GPG="gpg2"
 [[ -n $GPG_AGENT_INFO || $GPG == "gpg2" ]] && GPG_OPTS+=( "--batch" "--use-agent" )
 
+gpg_verify() {
+	[[ -n $CRYPT_SIGNING_KEY ]] || return 0
+	[[ -f $1.sig ]] || error "Signature for $1 does not exist."
+	local fingerprints="$($GPG $CRYPT_GPG_OPTS --verify --status-fd=1 "$1.sig" "$1" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG \([A-F0-9]\{40\}\) .* \([A-F0-9]\{40\}\)$/\1\n\2/p')"
+	local fingerprint found=0
+	for fingerprint in $CRYPT_SIGNING_KEY; do
+		[[ $fingerprint =~ ^[A-F0-9]{40}$ ]] || continue
+		[[ $fingerprints == *$fingerprint* ]] && { found=1; break; }
+	done
+	[[ $found -eq 1 ]] || error "Signature for $1 is invalid."
+}
+
 gpg_recipients() {
 	GPG_RECIPIENT_ARGS=( )
 	GPG_RECIPIENTS=( )
@@ -152,8 +164,8 @@ gpg_recipients() {
 	done
 	current="$current/.gpg-id"
 
-	[[ ! -f $current ]] && \
-	error "gpg-id is missing. Try to reinitialize the crypt."
+	[[ ! -f $current ]] && error "gpg-id is missing. You should initialize the crypt."
+	gpg_verify "$current"
 
 	local gpg_id
 	while read -r gpg_id; do
@@ -164,8 +176,6 @@ gpg_recipients() {
 		GPG_RECIPIENTS+=( "$gpg_id" )
 	done < "$current"
 }
-
-#TODO: SIGNING
 
 reencrypt_path() {
 	local prev_gpg_recipients="" gpg_keys="" current_keys="" index file
@@ -197,7 +207,7 @@ reencrypt_path() {
 			mv "$file_temp" "$file" || rm -f "$file_temp"
 		fi
 		prev_gpg_recipients="${GPG_RECIPIENTS[*]}"
-	done < <(find "$1" -path '*/.git' -prune -o -name '*/.extensions' -prune -o -iname '*.gpg' -print0)
+	done < <(find "$1" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print0)
 }
 
 # FILE INFO
@@ -238,6 +248,8 @@ entries_color+=( "blue,bold" )
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
 load_entries() {
+	gpg_verify "$1"
+
 	while IFS= read -r line; do
 		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
 		declare -A opts=( ["name"]="none" ["edit_action"]="none" ["insert_action"]="none" ["show_action"]="none" ["color"]="none" ["entry"]="none" )
@@ -356,8 +368,7 @@ cmd_init() {
 	git_prep "$gpg_id"
 
 	if [[ $# -eq 1 && -z $1 ]]; then
-		[[ ! -f "$gpg_id" ]] && \
-		error "$gpg_id does not exist and therefore it cannot be removed."
+		[[ ! -f "$gpg_id" ]] && error "$gpg_id does not exist and therefore it cannot be removed."
 
 		rm -v -f "$gpg_id" || exit 1
 		git -C "$INNER_GIT_DIR" rm -qr "$gpg_id"
@@ -368,6 +379,24 @@ cmd_init() {
 		local id_print="$(printf "%s, " "$@")"
 		echo "Crypt initialized for ${id_print%, }"
 		git_track "$gpg_id" "Set GPG id to ${id_print%, }."
+
+		if [[ -n $CRYPT_SIGNING_KEY ]]; then
+			local signing_keys=( ) key
+			for key in $CRYPT_SIGNING_KEY; do
+				signing_keys+=( --default-key $key )
+			done
+
+			$GPG "${GPG_OPTS[@]}" "${signing_keys[@]}" --detach-sign "$gpg_id" || error "Could not sign .gpg_id."
+			key="$($GPG "${GPG_OPTS[@]}" --verify --status-fd=1 "$gpg_id.sig" "$gpg_id" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG [A-F0-9]\{40\} .* \([A-F0-9]\{40\}\)$/\1/p')"
+			[[ -n $key ]] || error "Signing of .gpg_id unsuccessful."
+			git_track "$gpg_id.sig" "Signing new GPG id with ${key//[$IFS]/,}."
+
+			local entries="$CRYPT_PATH/.entries"
+			$GPG "${GPG_OPTS[@]}" "${signing_keys[@]}" --detach-sign "$entries" || error "Could not sign .entries."
+			key="$($GPG "${GPG_OPTS[@]}" --verify --status-fd=1 "$entries.sig" "$entries" 2>/dev/null | sed -n 's/^\[GNUPG:\] VALIDSIG [A-F0-9]\{40\} .* \([A-F0-9]\{40\}\)$/\1/p')"
+			[[ -n $key ]] || error "Signing of .entries unsuccessful."
+			git_track "$entries.sig" "Signing .entries with ${key//[$IFS]/,}."
+		fi
 	fi
 
 	reencrypt_path "$CRYPT_PATH/"
@@ -413,7 +442,7 @@ _cmd_edit_file() {
 	done
 
 	# XXX: Sometimes this gets a namespec error, why?
-	git_track "$file" "$what ${entries_name[$entry]} entry $path."
+	git_track "$file" "$what ${entries_name[$entry]} entry \`$path\`."
 }
 
 
@@ -426,7 +455,6 @@ cmd_insert() {
 	_cmd_edit_file "$path" insert
 }
 
-# TODO: Handle unencrypted files
 cmd_edit() {
 	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND file" Usage
 
@@ -596,7 +624,7 @@ cmd_copy_move() {
 		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
 			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
 			git_prep "$new_path"
-			git_track "$new_path" "Move ${1} to ${2}."
+			git_track "$new_path" "Move \`$1\` to \`$2\`."
 		fi
 		git_prep "$old_path"
 		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
@@ -608,7 +636,7 @@ cmd_copy_move() {
 	else
 		cp $interactive -r -v "$old_path" "$new_path" || exit 1
 		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
-		git_track "$new_path" "Copy ${1} to ${2}."
+		git_track "$new_path" "Copy \`$1\` to \`$2\`."
 	fi
 }
 
@@ -623,6 +651,21 @@ cmd_grep() {
 		echo "$(_color cyan,bold)$file$(_color reset):"
 		echo "$results"
 	done < <(find -L "$CRYPT_PATH" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print0)
+}
+
+cmd_verify() {
+	# TODO: Verify all the signatures in the crypt
+	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [file]" Usage
+	[[ -n $CRYPT_SIGNING_KEY ]] || error "No signing key was specified!"
+
+	printf "Verifying signatures for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
+
+	[[ $# -eq 1 ]] && gpg_verify "$1" && return
+
+	for f in ".gpg-id" ".entries"; do
+		echo "Checking signature for $f:"
+		gpg_verify "$CRYPT_PATH/$f" && echo "$(_color green)Valid$(_color reset)"
+	done
 }
 
 cmd_help() {
@@ -648,6 +691,9 @@ cmd_help() {
 
 		    $PROGRAM info
 		        List the crypt registered entries
+
+		    $PROGRAM verify [file]
+		        Verify the signature associated with a file or the crypt
 
 		    $PROGRAM git git-args...
 		        Run git commands
@@ -677,7 +723,9 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-[ "$COMMAND" != init ] && load_entries "$CRYPT_PATH/.entries"
+[[ "$COMMAND" != init && "$COMMAND" != verify && "$COMMAND" != open ]] && load_entries "$CRYPT_PATH/.entries"
+
+# TODO: What to do with unencrypted files???
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
@@ -691,8 +739,8 @@ case "$COMMAND" in
 
 	#close|lock) ;;
 	#open|unlock) ;;
-	#check|verify) ;; #SIGNATURE
 
+	verify) shift; cmd_verify "$@" ;;
 	git) shift; cmd_git "$@" ;;
 	init) shift; cmd_init "$@" ;;
 	info) shift; cmd_info "$@" ;;
