@@ -20,6 +20,8 @@ set -o pipefail
 
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 CRYPT_EXTENSION="${CRYPT_EXTENSION:-$CRYPT_PATH/.extensions}"
+CRYPT_ARCHIVE=".crypt.tar.gpg"
+CRYPT_PRETTY_PATH=$(cd $CRYPT_PATH; dirs +0)
 
 # UTILITIES
 declare -A _colors=(
@@ -242,7 +244,7 @@ entries_color+=( "gray" )
 
 # Unencrypted entry
 entries_ext+=( "" )
-entries_name+=( "unencrypted !" )
+entries_name+=( "unencrypted!" )
 entries_insert+=( "none" )
 entries_show+=( "none" )
 entries_edit+=( "none" )
@@ -273,11 +275,14 @@ load_entries() {
 		readarray -t arr < <(awk -v FPAT='(\"([^\"]|\\\\")*\"|[^[:space:]\"])+'  '{for (i=1; i<=NF; i++) print $i}' <<< $line)
 		declare -A opts=( ["name"]="none" ["edit_action"]="none" ["insert_action"]="none" ["show_action"]="none" ["color"]="none" ["entry"]="none" )
 
-		for w in "${arr[@]:1}"; do
+		for w in "${arr[@]}"; do
 			IFS='=' read -r k v <<< "$w"
 			opts["$k"]="${v:-none}"
 			[[ "${opts[$k]}" == $'"'* ]] && opts["$k"]="${opts[$k]:1:-1}" # Strip quotes
 		done
+
+		[ -z "${opts[name]}" ] && error "Extension not given for entry #$i"
+		[ -z "${opts[extension]}" ] && error "Extension not given for ${opts[name]}"
 
 		local i
 		case "${opts[extension]}" in
@@ -360,20 +365,20 @@ SHRED="shred -f -z"
 
 cmd_info() {
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
-		echo "Entry #$i"
-		echo "Name: '${entries_name[$i]}'"
-		echo "Ext: '${entries_ext[$i]}'"
-		echo "Edit: '${entries_edit[$i]}'"
-		echo "Show: '${entries_show[$i]}'"
-		echo "Insert: '${entries_insert[$i]}'"
+		echo "entry #$i"
+		echo "name: '${entries_name[$i]}'"
+		echo "extension: '${entries_ext[$i]}'"
+		echo "edit_action: '${entries_edit[$i]}'"
+		echo "show_action: '${entries_show[$i]}'"
+		echo "insert_action: '${entries_insert[$i]}'"
 
 		local reset="" color=""
 		color=$(_color ${entries_color[$i]})
 		[ -z "$color" ] || reset=$(_color reset)
-		printf "Color: '%s%s%s'\n\n" $color "${entries_color[$i]}" $reset
+		printf "color: '%s%s%s'\n\n" $color "${entries_color[$i]}" $reset
 	done
 
-	echo "${#entries_name[@]} entries in $(cd $CRYPT_PATH; dirs +0)/.entries"
+	echo "${#entries_name[@]} entries in $CRYPT_PRETTY_PATH/.entries"
 }
 
 cmd_init() {
@@ -451,7 +456,7 @@ _cmd_edit_file() {
 
 
 cmd_insert() {
-	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND entry" Usage
+	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND file" Usage
 
 	local path="${1%/}"
 	check_paths "$path"
@@ -541,7 +546,7 @@ cmd_list() {
 	local path="$CRYPT_PATH/${1#$CRYPT_PATH}"
 
 	if [ $plain -eq 0 ]; then
-		local header="Crypt ($(cd $CRYPT_PATH; dirs +0))"
+		local header="Crypt ($CRYPT_PRETTY_PATH)"
 
 		if [[ -n "$1" && "$1" != $CRYPT_PATH ]]; then
 			local color="" reset=""
@@ -552,16 +557,17 @@ cmd_list() {
 		fi
 
 		echo "$header"
+		[[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]] && echo "$(_color gray,bold)Closed 🔒$(_color reset)" && return
 		tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
-		local tmp=$(find "$path" -type f -iname '*.gpg' | sed -e "s~^$path\/*~~" | sort | \
-			while IFS='' read -r line; do local i=$(find_entry "$line"); echo "${line%.gpg} ${entries_name[$i]} ${line%.${entries_ext[$i]}.gpg}"; done)
-
-		local reps=$(echo "$tmp" | uniq -D -f 2)
+		local tmp=$(find "$path" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print | \
+			sed -e "s~^$path\/*~~" | sort | while IFS='' read -r line; do \
+			local i=$(find_entry "$line"); echo "${line%.gpg} ${entries_name[$i]} ${line%.${entries_ext[$i]}.gpg}"; done)
 
 		# XXX: Highly inefficient...
-		echo "$tmp" | comm -23 - <(echo "$reps") | awk '{print $3" "$2}'
+		local reps=$(echo "$tmp" | uniq -D -f 2)
+		echo "$tmp" | comm --nocheck-order -23 - <(echo "$reps") | awk '{print $3" "$2}'
 		echo "$reps" | awk '{print $1" "$2}'
 	fi
 }
