@@ -559,10 +559,10 @@ _cmd_list_fmt() {
 		[[ $2 -eq 0 && -f "$path.sig" ]] && reset2="$reset2 🔑"
 	fi
 
-	local tmp=${name%*.${entries_ext[$entry]}}
+	local tmp=${name%*.${entries_ext[$entry]}.gpg}
 	[ -z tmp ] || name=$tmp
 
-	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry_name$reset2~" <<< "$1"
+	sed "s~$path~$color1$name$reset1\t\v$color2$entry_name$reset2~" <<< "$1"
 }
 
 cmd_list() {
@@ -609,7 +609,7 @@ cmd_list() {
 		# XXX: Highly inefficient...
 		local reps=$(echo "$tmp" | uniq -D -f 2)
 		echo "$tmp" | comm --nocheck-order -23 - <(echo "$reps") | awk '{print $3"\t"$2}'
-		echo "$reps" | awk '{print $1"\t"$2}'
+		[ -z "$reps" ] || echo "$reps" | awk '{print $1"\t"$2}'
 	fi
 }
 
