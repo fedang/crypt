@@ -125,8 +125,15 @@ git_init() {
 	echo '*.gpg diff=gpg' > "$CRYPT_PATH/.gitattributes"
 	git_track '.gitattributes' "Configure git for gpg file diff."
 
-	touch "$CRYPT_PATH/.entries"
-	git_track '.entries' "Add \`.entries\` file."
+	echo "$CRYPT_ARCHIVE.*" > "$CRYPT_PATH/.gitignore"
+	git_track '.gitignore' "Configure gitignore."
+
+	local file="$CRYPT_PATH/.entries"
+	[[ ! -f "$file" ]] && \
+	echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color = cyan' > "$file" && \
+	echo 'extension=pass name=password edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=red' >> "$file"
+
+	git_track '.entries' "Add entries template."
 
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.binary true
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.textconv "$GPG -d ${GPG_OPTS[*]}"
@@ -828,7 +835,7 @@ PROGRAM="${0##*/}"
 COMMAND="$1"
 
 [[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]] && CRYPT_CLOSED=1
-[[ $CRYPT_CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open ]] || load_entries "$CRYPT_PATH/.entries"
+[[ $CRYPT_CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open || "$COMMAND" == init ]] || load_entries "$CRYPT_PATH/.entries"
 
 # TODO: What to do with unencrypted files???
 
