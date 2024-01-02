@@ -755,51 +755,57 @@ cmd_help() {
 	cat <<-EOF
 		Usage:
 		    $PROGRAM init gpg-id...
-		        Initialize the crypt at \$CRYPT_PATH
+				Initialize the crypt at \$CRYPT_PATH using the given GPG key(s).
+
+		    $PROGRAM open
+		        Open the crypt, extracting the content of the $CRYPT_ARCHIVE file.
+
+		    $PROGRAM close
+		        Close the crypt, creating the $CRYPT_ARCHIVE file.
 
 		    $PROGRAM [show] file
-		        Show the file using the entry's associated show_action
+		        Show the file using the entry's associated show_action.
 
 		    $PROGRAM insert file
-		        Insert the file using the entry's associated insert_action
+		        Insert the file using the entry's associated insert_action.
 
 		    $PROGRAM edit file
-		        Edit the file using the entry's associated edit_action
+		        Edit the file using the entry's associated edit_action.
 
 		    $PROGRAM list [--plain]
-		        List the crypt structure, associating each file to its entry name
+		        List the crypt structure, associating each file to its entry name.
 
 		    $PROGRAM grep [GREPOPTIONS] search-string
-		        Run grep with GREPOPTIONS and search-string
+		        Run grep with GREPOPTIONS and search-string.
 
 		    $PROGRAM info
-		        List the crypt registered entries
+		        List the crypt registered entries.
 
 		    $PROGRAM verify [--sign] [file]
-				Verify the signature of (or sign) a file or the whole crypt
+				Verify the signature of (or sign) a file or the whole crypt.
 
 		    $PROGRAM git git-args...
-		        Run git commands
+		        Run git commands with the crypt repository.
 
 		    $PROGRAM move old-path new-path
-		        Move a file from old-path to new-path
+		        Move a file from old-path to new-path.
 
 		    $PROGRAM copy old-path new-path
-		        Copy a file from old-path to new-path
+		        Copy a file from old-path to new-path.
 
 		    $PROGRAM remove path [-fr]
-		        Remove a file or directory
-
-		    $PROGRAM help
-		        Show this text
+		        Remove a file or directory.
 
 		    $PROGRAM version
-		        Show version information
+		        Show version information.
+
+		    $PROGRAM help
+		        Show this text.
 	EOF
 }
 
 cmd_version() {
-	echo "crypt v0"
+	echo "crypt v0.1"
 }
 
 # MAIN
