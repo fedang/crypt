@@ -629,6 +629,8 @@ cmd_show() {
 	if [[ -d $CRYPT_PATH/$path ]]; then
 		[[ -z $path ]] && path="$CRYPT_PATH"
 		cmd_list "$path"
+	elif [[ -z "$path" ]]; then
+		error "Try to initialize the crypt"
 	else
 		[[ $CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
 
@@ -792,7 +794,6 @@ cmd_close() {
 	rm -rf $file.old $file.sig.old
 
 	shred_data() {
-		# Maybe shred the files?
 		find "$CRYPT_PATH/" -mindepth 1 -maxdepth 1 -not \( -name '.extensions' -o -name '.gpg-id' -or -name '.gpg-id.sig' \
 			-or -name '.crypt.tar.gpg*' \) -exec rm -rf {} +
 	}
@@ -862,9 +863,9 @@ COMMAND="$1"
 
 [[ ! -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]]
 CLOSED=$?
-PRETTY_PATH=$(cd $CRYPT_PATH; dirs +0)
+PRETTY_PATH="${CRYPT_PATH/#\/home\/$USER/\~}"
 
-[[ $CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open || "$COMMAND" == init ]] || load_entries "$CRYPT_PATH/.entries"
+[[ $CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open || "$COMMAND" == init || ! -d "$CRYPT_PATH" ]] || load_entries "$CRYPT_PATH/.entries"
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
