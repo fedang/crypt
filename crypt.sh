@@ -266,7 +266,6 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
-# TODO: Consider hiding these
 # Signature entry
 entries_ext+=( "" )
 entries_name+=( "signature" )
@@ -541,7 +540,7 @@ cmd_remove() {
 }
 
 _cmd_list_fmt() {
-	read -a tmp <<< "$@"
+	read -a tmp <<< "$1"
 	local path=${tmp[-1]}
 
 	local name="$(basename -- "$path")"
@@ -556,27 +555,34 @@ _cmd_list_fmt() {
 		color2="$(_color "${entries_color[$entry]}")"
 		[ -z "${entries_color[$entry]}" ] || reset2="$(_color reset)"
 		entry_name="${entries_name[$entry]}"
+
+		# Add the icon for signed files
+		[[ $2 -eq 0 && -f "$path.sig" ]] && reset2="$reset2 🔑"
 	fi
 
 	local tmp=${name%*.${entries_ext[$entry]}}
 	[ -z tmp ] || name=$tmp
 
-	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry_name$reset2~" <<< "$@"
+	sed "s~$path~$color1${name%.gpg}$reset1\t\v$color2$entry_name$reset2~" <<< "$1"
 }
 
 cmd_list() {
-	local opts plain=0
-	opts="$($GETOPT -o p -l plain -n "$PROGRAM" -- "$@")"
+	local opts plain=0 all=0
+	opts="$($GETOPT -o p,a -l plain,all -n "$PROGRAM" -- "$@")"
 	local err=$?
 	eval set -- "$opts"
 	while true; do
 		case $1 in
 			-p|--plain) plain=1; shift ;;
+			-a|--all) all=1; shift ;;
 			--)           shift; break ;;
 		esac
 	done
 
+	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--plain|--all] [subdir]" Usage
+
 	local path="$CRYPT_PATH/${1#$CRYPT_PATH}"
+	[[ -d "$path" ]] || error "Given path does not exist"
 
 	if [ $plain -eq 0 ]; then
 		local header="Crypt ($PRETTY_PATH)"
@@ -590,8 +596,11 @@ cmd_list() {
 			header="$color$1$reset"
 		fi
 
+		local args=()
+		[[ $all -eq 0 ]] && args=( -I '*.sig' )
+
 		echo "$header"
-		tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
+		tree -f --noreport -l "$path" "${args[@]}" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line" $all; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
 		local tmp=$(find "$path" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print | \
@@ -600,8 +609,8 @@ cmd_list() {
 
 		# XXX: Highly inefficient...
 		local reps=$(echo "$tmp" | uniq -D -f 2)
-		echo "$tmp" | comm --nocheck-order -23 - <(echo "$reps") | awk '{print $3" "$2}'
-		echo "$reps" | awk '{print $1" "$2}'
+		echo "$tmp" | comm --nocheck-order -23 - <(echo "$reps") | awk '{print $3"\t"$2}'
+		echo "$reps" | awk '{print $1"\t"$2}'
 	fi
 }
 
@@ -811,14 +820,14 @@ cmd_help() {
 		    $PROGRAM edit file
 		        Edit the file using the entry's associated edit_action.
 
-		    $PROGRAM list [--plain]
+		    $PROGRAM list [--plain|--all] [subdir]
 		        List the crypt structure, associating each file to its entry name.
 
 		    $PROGRAM grep [GREPOPTIONS] search-string
 		        Run grep with GREPOPTIONS and search-string.
 
 		    $PROGRAM info
-		        List the crypt registered entries.
+		        List the loaded entries and other information for the crypt.
 
 		    $PROGRAM verify [--sign] [file]
 		        Verify the signature of (or sign) a file or the whole crypt.
