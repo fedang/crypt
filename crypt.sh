@@ -22,6 +22,7 @@ CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 CRYPT_EXTENSION="${CRYPT_EXTENSION:-$CRYPT_PATH/.extensions}"
 CRYPT_ARCHIVE=".crypt.tar.gpg"
 CRYPT_PRETTY_PATH=$(cd $CRYPT_PATH; dirs +0)
+CRYPT_CLOSED=0
 
 # UTILITIES
 declare -A _colors=(
@@ -364,6 +365,10 @@ GETOPT="getopt"
 SHRED="shred -f -z"
 
 cmd_info() {
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "You should open the crypt first."
+
+	echo "Crypt ($CRYPT_PRETTY_PATH) info"
+
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
 		echo "entry #$i"
 		echo "name: '${entries_name[$i]}'"
@@ -413,6 +418,8 @@ cmd_init() {
 }
 
 _cmd_edit_file() {
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to $2 a file."
+
 	local path="$1" file="$CRYPT_PATH/$path.gpg"
 	git_prep "$file"
 
@@ -557,7 +564,7 @@ cmd_list() {
 		fi
 
 		echo "$header"
-		[[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]] && echo "$(_color gray,bold)Closed 🔒$(_color reset)" && return
+		[[ $CRYPT_CLOSED -eq 1 ]] && echo "$(_color gray,bold)Closed 🔒$(_color reset)" && return
 		tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
@@ -581,6 +588,8 @@ cmd_git() {
 }
 
 cmd_show() {
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
+
 	local path="$1"
 	check_paths "$path"
 
@@ -604,6 +613,7 @@ cmd_show() {
 
 cmd_copy_move() {
 	[[ $# -ne 2 ]] && error "$PROGRAM $COMMAND old-path new-path" Usage
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to $COMMAND a file."
 
 	check_paths "$1" "$2"
 	local old_path="$CRYPT_PATH/${1%/}"
@@ -652,6 +662,8 @@ cmd_copy_move() {
 
 cmd_grep() {
 	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND [GREPOPTIONS] search-string" Usage
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to use $COMMAND."
+
 	local file results
 	while read -r -d "" file; do
 		results="$($GPG -d "${GPG_OPTS[@]}" "$file" | grep --color=always "$@")"
@@ -713,7 +725,7 @@ cmd_verify() {
 
 cmd_open() {
 	local file="$CRYPT_PATH/$CRYPT_ARCHIVE"
-	[[ -f "$file" ]] || error "Crypt already open."
+	[[ $CRYPT_CLOSED -eq 1 ]] || error "Crypt already open."
 
 	gpg_verify "$file"
 	$GPG -d "${GPG_OPTS[@]}" "$file" 2>/dev/null | tar x -C $CRYPT_PATH || error "Failed to open the archive."
@@ -725,7 +737,7 @@ cmd_open() {
 
 cmd_close() {
 	local file="$CRYPT_PATH/$CRYPT_ARCHIVE"
-	[[ -f "$file" ]] && error "Crypt already closed."
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "Crypt already closed."
 
 	touch $file $file.sig
 	gpg_recipients "$CRYPT_PATH"
@@ -755,7 +767,7 @@ cmd_help() {
 	cat <<-EOF
 		Usage:
 		    $PROGRAM init gpg-id...
-				Initialize the crypt at \$CRYPT_PATH using the given GPG key(s).
+		        Initialize the crypt at \$CRYPT_PATH using the given GPG key(s).
 
 		    $PROGRAM open
 		        Open the crypt, extracting the content of the $CRYPT_ARCHIVE file.
@@ -782,7 +794,7 @@ cmd_help() {
 		        List the crypt registered entries.
 
 		    $PROGRAM verify [--sign] [file]
-				Verify the signature of (or sign) a file or the whole crypt.
+		        Verify the signature of (or sign) a file or the whole crypt.
 
 		    $PROGRAM git git-args...
 		        Run git commands with the crypt repository.
@@ -812,7 +824,8 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-[[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" || "$COMMAND" == verify || "$COMMAND" == open ]] || load_entries "$CRYPT_PATH/.entries"
+[[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]] && CRYPT_CLOSED=1
+[[ $CRYPT_CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open ]] || load_entries "$CRYPT_PATH/.entries"
 
 # TODO: What to do with unencrypted files???
 
