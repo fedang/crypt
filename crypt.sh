@@ -630,7 +630,7 @@ cmd_show() {
 		[[ -z $path ]] && path="$CRYPT_PATH"
 		cmd_list "$path"
 	elif [[ -z "$path" ]]; then
-		error "Try to initialize the crypt"
+		error "Try to initialize the crypt."
 	else
 		[[ $CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
 
@@ -644,7 +644,7 @@ cmd_show() {
 		elif [[ -f "$CRYPT_PATH/$path" ]]; then
 			_cmd_action_file "$path" show
 		else
-			error "Try to initialize the crypt"
+			error "Try to initialize the crypt."
 		fi
 	fi
 }
@@ -726,9 +726,9 @@ cmd_verify() {
 	# TODO: Verify all the signatures in the crypt
 	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--sign] [file]" Usage
 	[[ -n $CRYPT_SIGNING_KEY ]] || error "No signing key was specified!"
+	[[ -d "$CRYPT_PATH" ]] || error "Try to initialize the crypt."
 
 	local to_verify=()
-
 	if [[ $# -eq 1 ]]; then
 		local path="$CRYPT_PATH/${1%/}"
 		check_paths "$path"
