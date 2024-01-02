@@ -711,6 +711,46 @@ cmd_verify() {
 	done
 }
 
+cmd_open() {
+	local file="$CRYPT_PATH/$CRYPT_ARCHIVE"
+	[[ -f "$file" ]] || error "Crypt already open."
+
+	gpg_verify "$file"
+	$GPG -d "${GPG_OPTS[@]}" "$file" 2>/dev/null | tar x -C $CRYPT_PATH || error "Failed to open the archive."
+
+	mv -f $file $file.old >/dev/null 2>&1
+	mv -f $file.sig $file.sig.old >/dev/null 2>&1
+	echo "Crypt successfully opened at $CRYPT_PRETTY_PATH"
+}
+
+cmd_close() {
+	local file="$CRYPT_PATH/$CRYPT_ARCHIVE"
+	[[ -f "$file" ]] && error "Crypt already closed."
+
+	touch $file $file.sig
+	gpg_recipients "$CRYPT_PATH"
+
+	tar c --exclude ".gpg-id" --exclude "$CRYPT_ARCHIVE.old" --exclude ".extensions" --exclude ".gpg-id.sig" \
+	--exclude "$CRYPT_ARCHIVE.sig.old" --exclude "$CRYPT_ARCHIVE" --exclude "$CRYPT_ARCHIVE.sig" -C $CRYPT_PATH . | \
+	"$GPG" -e "${GPG_RECIPIENT_ARGS[@]}" -o "$file" "${GPG_OPTS[@]}" 2>&1 >/dev/null || error "Failed to archive the crypt."
+
+	gpg_sign "$file"
+
+	# TODO Fix permissions
+	#chmod 400 "$file"
+	#chmod 400 "$file.sig" 2>/dev/null
+
+	echo "The crypt has been closed, cleaning up old data..."
+	rm -rf $file.old $file.sig.old
+
+	shred_data() {
+		# Maybe shred the files?
+		find "$CRYPT_PATH/" -mindepth 1 -maxdepth 1 -not \( -name '.extensions' -o -name '.gpg-id' -or -name '.gpg-id.sig' \
+			-or -name '.crypt.tar.gpg*' \) -exec rm -rf {} +
+	}
+	trap shred_data EXIT
+}
+
 cmd_help() {
 	cat <<-EOF
 		Usage:
@@ -766,23 +806,15 @@ cmd_version() {
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
-[[ "$COMMAND" != init && "$COMMAND" != verify && "$COMMAND" != open ]] && load_entries "$CRYPT_PATH/.entries"
+[[ -f "$CRYPT_PATH/$CRYPT_ARCHIVE" || "$COMMAND" == verify || "$COMMAND" == open ]] || load_entries "$CRYPT_PATH/.entries"
 
 # TODO: What to do with unencrypted files???
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
 	version|--version) shift; cmd_version "$@" ;;
-
-	# IDEA FOR CLOSE AND OPEN
-	# basically when you open the crypt (which is a tar.gz.gpg) a ramfs/tmpfs is created and the
-	# archive is put there, then it mounted to the crypt path, and modification are only in memory
-	# then when you close the thing is closed and created an updated archive
-	# maybe it is not needed since everything is encrypted. idk
-
-	#close|lock) ;;
-	#open|unlock) ;;
-
+	close) shift; cmd_close "$@" ;;
+	open) shift; cmd_open "$@" ;;
 	verify) shift; cmd_verify "$@" ;;
 	git) shift; cmd_git "$@" ;;
 	init) shift; cmd_init "$@" ;;
