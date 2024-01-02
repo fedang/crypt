@@ -96,6 +96,8 @@ unset GIT_DIR GIT_WORK_TREE GIT_NAMESPACE GIT_INDEX_FILE GIT_INDEX_VERSION GIT_O
 export GIT_CEILING_DIRECTORIES="$CRYPT_PATH/.."
 
 git_prep() {
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "To update git you must open the crypt."
+
 	INNER_GIT_DIR="${1%/*}"
 	while [[ ! -d $INNER_GIT_DIR && ${INNER_GIT_DIR%/*}/ == "${CRYPT_PATH%/}/"* ]]; do
 		INNER_GIT_DIR="${INNER_GIT_DIR%/*}"
@@ -388,6 +390,7 @@ cmd_info() {
 
 cmd_init() {
 	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND gpg-id..." Usage
+	[[ $CRYPT_CLOSED -eq 1 ]] && error "You should open the crypt first."
 
 	mkdir -v -p "$CRYPT_PATH/"
 	git_init
@@ -417,7 +420,7 @@ cmd_init() {
 	git_track "$CRYPT_PATH/" "Reencrypt crypt using new GPG id ${id_print%, }."
 }
 
-_cmd_edit_file() {
+_cmd_action_file() {
 	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to $2 a file."
 
 	local path="$1" file="$CRYPT_PATH/$path.gpg"
@@ -468,7 +471,7 @@ cmd_insert() {
 	local path="${1%/}"
 	check_paths "$path"
 	path=$(confirm_file "$path")
-	_cmd_edit_file "$path" insert
+	_cmd_action_file "$path" insert
 }
 
 cmd_edit() {
@@ -477,7 +480,7 @@ cmd_edit() {
 	local path="${1%/}"
 	check_paths "$path"
 	path=$(check_file "$path")
-	_cmd_edit_file "$path" edit
+	_cmd_action_file "$path" edit
 }
 
 cmd_remove() {
@@ -554,6 +557,7 @@ cmd_list() {
 
 	if [ $plain -eq 0 ]; then
 		local header="Crypt ($CRYPT_PRETTY_PATH)"
+		[[ $CRYPT_CLOSED -eq 1 ]] && printf "%s\n%s\n" "$header" "$(_color gray,bold)Closed 🔒$(_color reset)" && return
 
 		if [[ -n "$1" && "$1" != $CRYPT_PATH ]]; then
 			local color="" reset=""
@@ -564,7 +568,6 @@ cmd_list() {
 		fi
 
 		echo "$header"
-		[[ $CRYPT_CLOSED -eq 1 ]] && echo "$(_color gray,bold)Closed 🔒$(_color reset)" && return
 		tree -f --noreport -l "$path" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
@@ -588,8 +591,6 @@ cmd_git() {
 }
 
 cmd_show() {
-	[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
-
 	local path="$1"
 	check_paths "$path"
 
@@ -597,6 +598,8 @@ cmd_show() {
 		[[ -z $path ]] && path="$CRYPT_PATH"
 		cmd_list "$path"
 	else
+		[[ $CRYPT_CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
+
 		path="${1%/}"
 		path=$(check_file "${path%.gpg}" noask)
 		[[ $? -eq 0 ]] || exit 1
@@ -604,7 +607,7 @@ cmd_show() {
 		if [[ -z "$path" ]]; then
 			error "$1 not found in the crypt"
 		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
-			_cmd_edit_file "$path" show
+			_cmd_action_file "$path" show
 		else
 			error "Try to initialize the crypt"
 		fi
