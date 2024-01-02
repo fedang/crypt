@@ -266,6 +266,7 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
+# TODO: Consider hiding these
 # Signature entry
 entries_ext+=( "" )
 entries_name+=( "signature" )
@@ -330,7 +331,7 @@ find_entry() {
 		entry=2
 	elif [[ "$path" == *.sig ]]; then
 		entry=3
-	elif [[ -f "$path" && "$path" != *.gpg ]]; then
+	elif [[ -f "$CRYPT_PATH/$path" && "$path" != *.gpg ]]; then
 		entry=1
 	else
 		for ((i = 4; i < ${#entries_ext[@]}; i++)); do
@@ -351,7 +352,9 @@ check_file() {
 	local matches=()
 	for ((i = 4; i < ${#entries_name[@]}; i++)); do
 		[[ "$path" == *.${entries_ext[$i]}  ]] && echo "$path" && return
-		[[ -f "$CRYPT_PATH/$path.${entries_ext[$i]}.gpg" ]] && matches+=( "$path.${entries_ext[$i]}" )
+		if [[ -f "$CRYPT_PATH/$path.${entries_ext[$i]}.gpg" ]]; then
+			matches+=( "$path.${entries_ext[$i]}" )
+		fi
 	done
 
 	case ${#matches[@]} in
@@ -440,7 +443,7 @@ cmd_init() {
 _cmd_action_file() {
 	[[ $CLOSED -eq 1 ]] && error "The crypt must be open to $2 a file."
 
-	local path="$1" file="$CRYPT_PATH/$path"
+	local path="$1" file="$CRYPT_PATH/${path%.gpg}.gpg"
 	git_prep "$file"
 
 	[[ -d $file ]] && error "The given path is a directory."
