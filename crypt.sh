@@ -126,13 +126,6 @@ git_init() {
 	echo "$CRYPT_ARCHIVE.*" > "$CRYPT_PATH/.gitignore"
 	git_track '.gitignore' "Configure gitignore."
 
-	local file="$CRYPT_PATH/.entries"
-	[[ ! -f "$file" ]] && \
-	echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color = cyan' > "$file" && \
-	echo 'extension=pass name=password edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=red' >> "$file"
-
-	git_track '.entries' "Add entries template."
-
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.binary true
 	git -C "$INNER_GIT_DIR" config --local diff.gpg.textconv "$GPG -d ${GPG_OPTS[*]}"
 }
@@ -428,11 +421,17 @@ cmd_init() {
 		printf "%s\n" "$@" > "$gpg_id"
 		local id_print="$(printf "%s, " "$@")"
 		echo "Crypt initialized for ${id_print%, }"
-		git_track "$gpg_id" "Set GPG id to ${id_print%, }."
 
-		gpg_sign "$gpg_id" && git_track "$gpg_id.sig" "Signing new GPG id with ${key//[$IFS]/,}."
+		git_track "$gpg_id" "Set GPG id to ${id_print%, }."
+		gpg_sign "$gpg_id" && git_track "$gpg_id.sig" "Signing new GPG id with $CRYPT_SIGNING_KEY."
+
 		local entries="$CRYPT_PATH/.entries"
-		gpg_sign "$entries" && git_track "$entries.sig" "Signing .entries with ${key//[$IFS]/,}."
+		[[ ! -f "$entries" ]] && \
+		echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color = cyan' > "$entries" && \
+		echo 'extension=pass name=password edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=red' >> "$entries"
+
+		git_track "$entries" "Add entries template."
+		gpg_sign "$entries" && git_track "$entries.sig" "Signing entries template with $CRYPT_SIGNING_KEY."
 	fi
 
 	reencrypt_path "$CRYPT_PATH/"
