@@ -266,6 +266,14 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
+# Signature entry
+entries_ext+=( "" )
+entries_name+=( "signature" )
+entries_insert+=( "none" )
+entries_show+=( 'gpg_verify "\${1%.sig}"' )
+entries_edit+=( "none" )
+entries_color+=( "gray,bold" )
+
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
@@ -320,10 +328,12 @@ find_entry() {
 	local path="${1#$CRYPT_PATH/}" entry=0
 	if [ -d "$CRYPT_PATH/$path" ]; then
 		entry=2
-	elif [[ "$path" != *.gpg ]]; then
+	elif [[ "$path" == *.sig ]]; then
+		entry=3
+	elif [[ -f "$path" && "$path" != *.gpg ]]; then
 		entry=1
 	else
-		for ((i = 3; i < ${#entries_ext[@]}; i++)); do
+		for ((i = 4; i < ${#entries_ext[@]}; i++)); do
 			if [[ "${path%.gpg}" == *.${entries_ext[$i]} ]]; then
 				entry=$i
 				break
@@ -335,30 +345,32 @@ find_entry() {
 
 check_file() {
 	local path="${1#$CRYPT_PATH/}"
+	path=${path%.gpg}
 	[[ -f "$CRYPT_PATH/$path.gpg" ]] && echo "$path" && return
 
 	local matches=()
-	for ((i = 3; i < ${#entries_name[@]}; i++)); do
-		readarray -t -O ${#matches[@]} matches < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/${path%/}.${entries_ext[$i]}.gpg" -print)
+	for ((i = 4; i < ${#entries_name[@]}; i++)); do
+		[[ "$path" == *.${entries_ext[$i]}  ]] && echo "$path" && return
+		[[ -f "$CRYPT_PATH/$path.${entries_ext[$i]}.gpg" ]] && matches+=( "$path.${entries_ext[$i]}" )
 	done
 
 	case ${#matches[@]} in
 		0) [[ "$2" == "noask" ]] || confirm_file "$path" ;;
-		1) [[ "${matches[0]}" =~ $CRYPT_PATH/(.*)\.gpg ]] && echo "${BASH_REMATCH[1]}" ;;
+		1) echo "${matches[0]%.gpg}" ;;
 		*) error "Ambiguous entry name: $(echo "${matches[@]}" | sed "s~$CRYPT_PATH/\([^[:space:]]*\).gpg~\1~g")" ;;
 	esac
 }
 
 confirm_file() {
-	local entry=$(find_entry "${1%.gpg}.gpg") ans=""
-	[[ ($entry -eq 0 && ${#entries_ext[@]} -eq 3) || $entry -eq 1 ]] && echo "$1" && return
+	local entry=$(find_entry "$1") ans=""
+	[[ ($entry -eq 0 && ${#entries_ext[@]} -eq 4) || $entry -eq 1 || $entry -gt 3 ]] && echo "$1" && return
 
 	while true; do
-		for ((i = 3; i < ${#entries_name[@]}; i++)); do
+		for ((i = 4; i < ${#entries_name[@]}; i++)); do
 			echo "${entries_ext[$i]}) $(_color ${entries_color[$i]})${entries_name[$i]}$(_color reset)" >&2
 		done
 		read -r -p "Select one of the valid entries: " ans
-		for ((i = 3; i < ${#entries_name[@]}; i++)); do
+		for ((i = 4; i < ${#entries_name[@]}; i++)); do
 			if [[ "$ans" == "${entries_ext[$i]}" || "$ans" == "${entries_name[$i]}" ]]; then
 				echo "${1%.}.$ans"
 				return
@@ -428,16 +440,14 @@ cmd_init() {
 _cmd_action_file() {
 	[[ $CLOSED -eq 1 ]] && error "The crypt must be open to $2 a file."
 
-	local path="$1" file="$CRYPT_PATH/$path.gpg"
+	local path="$1" file="$CRYPT_PATH/$path"
 	git_prep "$file"
 
-	[[ -d $file ]] && error "Path is a directory"
-	[[ "$2" == insert && -e $file ]] && confirm "An entry already exists for $path. Overwrite it?"
+	[[ -d $file ]] && error "The given path is a directory."
+	[[ "$2" == insert && -e $file ]] && confirm "File $path already exists. Overwrite it?"
 
 	mkdir -p -v "$CRYPT_PATH/$(dirname -- "$path")"
 	gpg_recipients "$(dirname -- "$path")"
-
-	local entry=$(find_entry "$file")
 
 	make_tmpdir
 	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
@@ -448,11 +458,14 @@ _cmd_action_file() {
 		what="Update"
 	fi
 
+	local entry=$(find_entry "$file")
 	local action=none
-	case $2 in
+
+	case "$2" in
 		insert) action="${entries_insert[$entry]}" ;;
 		edit) action="${entries_edit[$entry]}" ;;
 		show) action="${entries_show[$entry]}" ;;
+		*) error "Unknown action" ;;
 	esac
 
 	eval "$action" "$tmp_file"
@@ -465,7 +478,6 @@ _cmd_action_file() {
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
 
-	# XXX: Sometimes this gets a namespec error, why?
 	git_track "$file" "$what ${entries_name[$entry]} entry \`$path\`."
 }
 
@@ -485,7 +497,10 @@ cmd_edit() {
 	local path="${1%/}"
 	check_paths "$path"
 	path=$(check_file "$path")
+	[[ $? -eq 0 ]] || exit 1
+	[[ -z "$path" ]] && error "$1 not found in the crypt"
 	_cmd_action_file "$path" edit
+
 }
 
 cmd_remove() {
@@ -596,7 +611,7 @@ cmd_git() {
 }
 
 cmd_show() {
-	local path="$1"
+	local path="${1%/}"
 	check_paths "$path"
 
 	if [[ -d $CRYPT_PATH/$path ]]; then
@@ -605,13 +620,14 @@ cmd_show() {
 	else
 		[[ $CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
 
-		path="${1%/}"
-		path=$(check_file "${path%.gpg}" noask)
+		path=$(check_file "$path" noask)
 		[[ $? -eq 0 ]] || exit 1
 
 		if [[ -z "$path" ]]; then
 			error "$1 not found in the crypt"
 		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
+			_cmd_action_file "$path" show
+		elif [[ -f "$CRYPT_PATH/$path" ]]; then
 			_cmd_action_file "$path" show
 		else
 			error "Try to initialize the crypt"
@@ -837,8 +853,6 @@ CLOSED=$?
 PRETTY_PATH=$(cd $CRYPT_PATH; dirs +0)
 
 [[ $CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open || "$COMMAND" == init ]] || load_entries "$CRYPT_PATH/.entries"
-
-# TODO: What to do with unencrypted files???
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
