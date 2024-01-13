@@ -281,7 +281,10 @@ load_entries() {
 		for w in "${arr[@]}"; do
 			IFS='=' read -r k v <<< "$w"
 			opts["$k"]="${v:-none}"
-			[[ "${opts[$k]}" == $'"'* ]] && opts["$k"]="${opts[$k]:1:-1}" # Strip quotes
+			case "${opts[$k]}" in
+				$'"'*|$'\''*) opts["$k"]="${opts[$k]:1:-1}" ;;
+				# TODO: Fix string parsing
+			esac
 		done
 
 		[ -z "${opts[name]}" ] && error "Extension not given for entry #$i"
