@@ -515,17 +515,17 @@ cmd_remove() {
 	local file="$CRYPT_PATH/$path.gpg"
 
 	[[ -f $file && -d $dir && $path == */ || ! -f $file ]] && file="${dir%/}/"
-	[[ -e $file ]] || error "$path is not in the password store."
+	[[ -e $file ]] || error "$path is not in the crypt."
 	git_prep "$file"
 
 	[[ $force -eq 1 ]] || confirm "Are you sure you would like to delete $path?"
 
 	rm $recursive -f -v "$file"
 	git_prep "$file"
-	if [[ -n $INNER_GIT_DIR && ! -e $file ]]; then
+	if [[ ! -e $file ]]; then
 		git -C "$INNER_GIT_DIR" rm -qr "$file"
 		git_prep "$file"
-		git_commit "Remove $path from store."
+		git_commit "Remove $path from crypt."
 	fi
 	rmdir -p "${file%/*}" 2>/dev/null
 }
@@ -651,7 +651,7 @@ cmd_copy_move() {
 		old_dir="${old_path%/*}"
 		old_path="${old_path}.gpg"
 	fi
-	[[ -e $old_path ]] || error "$1 is not in the password store."
+	[[ -e $old_path ]] || error "$1 is not in the crypt."
 
 	mkdir -p -v "${new_path%/*}"
 	[[ -d $old_path || -d $new_path || $new_path == */ ]] || new_path="${new_path}.gpg"
@@ -711,42 +711,62 @@ cmd_sign() {
 	esac done
 
 	# TODO: Verify all the signatures in the crypt
-	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--verify|--remove] [file]" Usage
+	[[ $verify -eq 1 && $remove -eq 1 ]] && error "$PROGRAM $COMMAND [--verify|--remove] [files]" Usage
 	[[ -n "$CRYPT_SIGNING_KEY" ]] || error "No signing key was specified!"
 	[[ -d "$CRYPT_PATH" ]] || error "Try to initialize the crypt."
 
-	local to_verify=()
-	if [[ $# -eq 1 ]]; then
-		local path="$CRYPT_PATH/${1%/}"
-		check_paths "$path"
-		[ -f "$path" ] || path="$path.gpg"
-
-		# If it fails, try loading .entries
-		if [ ! -f "$path" ]; then
-			load_entries "$CRYPT_PATH/.entries"
-			path="$CRYPT_PATH/$(check_file "$path" noask)"
-			[[ $? -ne 0 || -z $path ]] && exit 1
-			[ -f "$path" ] || path="$path.gpg"
-			[ -f "$path" ] || error "$1 not found in crypt."
-		fi
-
-		if [[ $verify -eq 1 ]]; then
-			to_verify+=( "$path" )
-		else
-			printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
-			gpg_sign "$path"
-			echo "$(_color green)$1 signed successfully$(_color reset)"
-			return
-		fi
+	local loaded=0 files=()
+	if [[ $# -eq 0 ]]; then
+		[[ $verify -eq 1 ]] || error "Expected file argument"
+		readarray -t files < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/*.sig" -print)
 	else
-		[[ $verify -eq 1 ]] || error "File to sign not given"
-		readarray -t to_verify < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/*.sig" -print)
+		for path in "$@"; do
+			local path="$CRYPT_PATH/${path%/}"
+			path="${path%.sig}"
+			check_paths "$path"
+			[ -f "$path" ] || path="$path.gpg"
+
+			if [ ! -f "$path" ]; then
+				# If it fails, try loading .entries
+				if [[ $loaded -eq 0 ]]; then
+					load_entries "$CRYPT_PATH/.entries"
+					loaded=1
+				fi
+
+				path="$CRYPT_PATH/$(check_file "$path" noask)"
+				[[ $? -ne 0 || -z $path ]] && exit 1
+				[ -f "$path" ] || path="$path.gpg"
+				[ -f "$path" ] || error "$1 not found in crypt."
+			fi
+			files+=( "$path" )
+		done
 	fi
 
-	printf "Verifying signatures for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
-	for f in "${to_verify[@]}"; do
-		gpg_verify "${f%.sig}" && echo "${f#$CRYPT_PATH/}: $(_color green)Valid$(_color reset)"
-	done
+	if [[ $verify -eq 1 ]]; then
+		printf "Verifying signatures for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
+		for f in "${files[@]}"; do
+			gpg_verify "${f%.sig}" && echo "$f: $(_color green)Valid$(_color reset)"
+		done
+	elif [[ $remove -eq 1 ]]; then
+		for f in "${files[@]}"; do
+			local file="$CRYPT_PATH/${f%.sig}.sig"
+			[[ ! -f "$file" ]] && echo "${f%.sig} is not signed!" && continue
+
+			rm -f -v "$file"
+			git_prep "$file"
+			if [[ ! -e $file ]]; then
+				git -C "$INNER_GIT_DIR" rm -qr "$file"
+				git_prep "$file"
+				git_commit "Remove $f signature from crypt."
+			fi
+			rmdir -p "${file%/*}" 2>/dev/null
+		done
+	else
+		printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
+		for f in "${files[@]}"; do
+			gpg_sign "$f" && echo "$(_color green)$f signed successfully$(_color reset)"
+		done
+	fi
 }
 
 cmd_open() {
@@ -818,7 +838,7 @@ cmd_help() {
 		    $PROGRAM info
 		        List the loaded entries and other information for the crypt.
 
-		    $PROGRAM sign [--verify|--remove] [file]
+		    $PROGRAM sign [--verify|--remove] [files]
 		        Sign (or verify the signature of) a file file or the whole crypt.
 		        Uses the key(s) in \$CRYPT_SIGNING_KEY for the signatures.
 
