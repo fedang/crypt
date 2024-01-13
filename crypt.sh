@@ -259,18 +259,12 @@ entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 
-# Signature entry
-entries_ext+=( "" )
-entries_name+=( "signature" )
-entries_insert+=( "none" )
-entries_show+=( 'gpg_verify "\${1%.sig}"' )
-entries_edit+=( "none" )
-entries_color+=( "gray,bold" )
-
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
 load_entries() {
+	[[ -d "$CRYPT_PATH" && $CLOSED -eq 0 ]] || return
+
 	warn_entries() {
 		printf "\n%s\n%s\n" \
 			"If you have changed the .entries file yourself, you also need to update its signature." \
@@ -321,12 +315,10 @@ find_entry() {
 	local path="${1#$CRYPT_PATH/}" entry=0
 	if [ -d "$CRYPT_PATH/$path" ]; then
 		entry=2
-	elif [[ "$path" == *.sig ]]; then
-		entry=3
 	elif [[ -f "$CRYPT_PATH/$path" && "$path" != *.gpg ]]; then
 		entry=1
 	else
-		for ((i = 4; i < ${#entries_ext[@]}; i++)); do
+		for ((i = 3; i < ${#entries_ext[@]}; i++)); do
 			if [[ "${path%.gpg}" == *.${entries_ext[$i]} ]]; then
 				entry=$i
 				break
@@ -342,7 +334,7 @@ check_file() {
 	[[ -f "$CRYPT_PATH/$path.gpg" ]] && echo "$path" && return
 
 	local matches=()
-	for ((i = 4; i < ${#entries_name[@]}; i++)); do
+	for ((i = 3; i < ${#entries_name[@]}; i++)); do
 		[[ "$path" == *.${entries_ext[$i]}  ]] && echo "$path" && return
 		if [[ -f "$CRYPT_PATH/$path.${entries_ext[$i]}.gpg" ]]; then
 			matches+=( "$path.${entries_ext[$i]}" )
@@ -361,11 +353,11 @@ confirm_file() {
 	[[ ($entry -eq 0 && ${#entries_ext[@]} -eq 4) || $entry -eq 1 || $entry -gt 3 ]] && echo "$1" && return
 
 	while true; do
-		for ((i = 4; i < ${#entries_name[@]}; i++)); do
+		for ((i = 3; i < ${#entries_name[@]}; i++)); do
 			echo "${entries_ext[$i]}) $(_color ${entries_color[$i]})${entries_name[$i]}$(_color reset)" >&2
 		done
 		read -r -p "Select one of the valid entries: " ans
-		for ((i = 4; i < ${#entries_name[@]}; i++)); do
+		for ((i = 3; i < ${#entries_name[@]}; i++)); do
 			if [[ "$ans" == "${entries_ext[$i]}" || "$ans" == "${entries_name[$i]}" ]]; then
 				echo "${1%.}.$ans"
 				return
@@ -556,7 +548,7 @@ _cmd_list_fmt() {
 		entry_name="${entries_name[$entry]}"
 
 		# Add the icon for signed files
-		[[ $2 -eq 0 && -f "$path.sig" ]] && reset2="$reset2 🔑"
+		[[ -f "$path.sig" ]] && reset2="$reset2 🔑"
 	fi
 
 	local tmp=${name%*.${entries_ext[$entry]}.gpg}
@@ -566,19 +558,18 @@ _cmd_list_fmt() {
 }
 
 cmd_list() {
-	local opts plain=0 all=0
-	opts="$($GETOPT -o p,a -l plain,all -n "$PROGRAM" -- "$@")"
+	local opts plain=0
+	opts="$($GETOPT -o p -l plain -n "$PROGRAM" -- "$@")"
 	local err=$?
 	eval set -- "$opts"
 	while true; do
 		case $1 in
 			-p|--plain) plain=1; shift ;;
-			-a|--all) all=1; shift ;;
 			--)           shift; break ;;
 		esac
 	done
 
-	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--plain|--all] [subdir]" Usage
+	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--plain] [subdir]" Usage
 
 	local path="$CRYPT_PATH/${1#$CRYPT_PATH}"
 	[[ -d "$path" ]] || error "Given path does not exist"
@@ -589,17 +580,13 @@ cmd_list() {
 
 		if [[ -n "$1" && "$1" != $CRYPT_PATH ]]; then
 			local color="" reset=""
-			# DIR ENTRY 2
 			color=$(_color ${entries_color[2]})
 			reset=$(_color reset)
 			header="$color$1$reset"
 		fi
 
-		local args=()
-		[[ $all -eq 0 ]] && args=( -I '*.sig' )
-
 		echo "$header"
-		tree -f --noreport -l "$path" "${args[@]}" | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line" $all; done | \
+		tree -f --noreport -l "$path" "${args[@]}" -I '*.sig' | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
 		local tmp=$(find "$path" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print | \
@@ -712,19 +699,20 @@ cmd_grep() {
 	done < <(find -L "$CRYPT_PATH" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print0)
 }
 
-cmd_verify() {
-	local opts sign=0
-	opts="$($GETOPT -o s -l sign -n "$PROGRAM" -- "$@")"
+cmd_sign() {
+	local opts verify=0 remove=0
+	opts="$($GETOPT -o v,r -l verify,remove -n "$PROGRAM" -- "$@")"
 	local err=$?
 	eval set -- "$opts"
 	while true; do case $1 in
-		-s|--sign) sign=1; shift ;;
+		-v|--verify) verify=1; shift ;;
+		-r|--remove) remove=1; shift ;;
 		--) shift; break ;;
 	esac done
 
 	# TODO: Verify all the signatures in the crypt
-	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--sign] [file]" Usage
-	[[ -n $CRYPT_SIGNING_KEY ]] || error "No signing key was specified!"
+	[[ $# -gt 1 ]] && error "$PROGRAM $COMMAND [--verify|--remove] [file]" Usage
+	[[ -n "$CRYPT_SIGNING_KEY" ]] || error "No signing key was specified!"
 	[[ -d "$CRYPT_PATH" ]] || error "Try to initialize the crypt."
 
 	local to_verify=()
@@ -742,15 +730,16 @@ cmd_verify() {
 			[ -f "$path" ] || error "$1 not found in crypt."
 		fi
 
-		if [[ $sign -eq 1 ]]; then
+		if [[ $verify -eq 1 ]]; then
+			to_verify+=( "$path" )
+		else
 			printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
 			gpg_sign "$path"
 			echo "$(_color green)$1 signed successfully$(_color reset)"
 			return
-		else
-			to_verify+=( "$path" )
 		fi
 	else
+		[[ $verify -eq 1 ]] || error "File to sign not given"
 		readarray -t to_verify < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/*.sig" -print)
 	fi
 
@@ -820,7 +809,7 @@ cmd_help() {
 		    $PROGRAM edit file
 		        Edit the file using the entry's associated edit_action.
 
-		    $PROGRAM list [--plain|--all] [subdir]
+		    $PROGRAM list [--plain] [subdir]
 		        List the crypt structure, associating each file to its entry name.
 
 		    $PROGRAM grep [GREPOPTIONS] search-string
@@ -829,8 +818,9 @@ cmd_help() {
 		    $PROGRAM info
 		        List the loaded entries and other information for the crypt.
 
-		    $PROGRAM verify [--sign] [file]
-		        Verify the signature of (or sign) a file or the whole crypt.
+		    $PROGRAM sign [--verify|--remove] [file]
+		        Sign (or verify the signature of) a file file or the whole crypt.
+		        Uses the key(s) in \$CRYPT_SIGNING_KEY for the signatures.
 
 		    $PROGRAM git git-args...
 		        Run git commands with the crypt repository.
@@ -857,21 +847,21 @@ cmd_version() {
 }
 
 # MAIN
+PRETTY_PATH="${CRYPT_PATH/#\/home\/$USER/\~}"
 PROGRAM="${0##*/}"
 COMMAND="$1"
 
 [[ ! -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]]
 CLOSED=$?
-PRETTY_PATH="${CRYPT_PATH/#\/home\/$USER/\~}"
 
-[[ $CLOSED -eq 1 || "$COMMAND" == verify || "$COMMAND" == open || "$COMMAND" == init || ! -d "$CRYPT_PATH" ]] || load_entries "$CRYPT_PATH/.entries"
+[[ "$COMMAND" == sign || "$COMMAND" == open || "$COMMAND" == init ]] || load_entries "$CRYPT_PATH/.entries"
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
 	version|--version) shift; cmd_version "$@" ;;
 	close) shift; cmd_close "$@" ;;
 	open) shift; cmd_open "$@" ;;
-	verify) shift; cmd_verify "$@" ;;
+	sign) shift; cmd_sign "$@" ;;
 	git) shift; cmd_git "$@" ;;
 	init) shift; cmd_init "$@" ;;
 	info) shift; cmd_info "$@" ;;
