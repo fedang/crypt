@@ -272,8 +272,8 @@ load_extensions() {
 	[[ -d "$CRYPT_PATH/.extensions" && $CLOSED -eq 0 ]] || return
 
 	for f in $CRYPT_PATH/.extensions/*.bash; do
-		[[ -f "$f.sig" && -n "$CRYPT_SIGNING_KEY" ]] && gpg_verify "$f"
-		source "$f"
+		[[ -n "$CRYPT_SIGNING_KEY" ]] && gpg_verify "$f"
+		source "$f" "$f"
 	done
 }
 
