@@ -18,8 +18,10 @@
 umask 077
 set -o pipefail
 
+# TODO: Is this really needed
+shopt -s nullglob
+
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
-CRYPT_EXTENSION="${CRYPT_EXTENSION:-$CRYPT_PATH/.extensions}"
 CRYPT_ARCHIVE="${CRYPT_ARCHIVE:-.crypt.tar.gpg}"
 
 # UTILITIES
@@ -266,6 +268,15 @@ entries_desc+=( "Directories" )
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
 
+load_extensions() {
+	[[ -d "$CRYPT_PATH/.extensions" && $CLOSED -eq 0 ]] || return
+
+	for f in $CRYPT_PATH/.extensions/*.bash; do
+		[[ -f "$f.sig" && -n "$CRYPT_SIGNING_KEY" ]] && gpg_verify "$f"
+		source "$f"
+	done
+}
+
 load_entries() {
 	[[ -d "$CRYPT_PATH" && $CLOSED -eq 0 ]] || return
 
@@ -382,7 +393,7 @@ SHRED="shred -f -z"
 cmd_info() {
 	[[ $CLOSED -eq 1 ]] && error "You should open the crypt first."
 
-	echo "Crypt ($PRETTY_PATH) info"
+	echo "Crypt info ($PRETTY_PATH)"
 
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
 		echo "entry #$i"
@@ -399,7 +410,19 @@ cmd_info() {
 		printf "color: '%s%s%s'\n\n" $color "${entries_color[$i]}" $reset
 	done
 
-	echo "${#entries_name[@]} entries in $PRETTY_PATH/.entries"
+	printf "${#entries_name[@]} entries in $PRETTY_PATH/.entries\n\n"
+
+	[[ ! -d "$CRYPT_PATH/.extensions" ]] && echo "Extension directory not found ($PRETTY_PATH/.extensions)" && return
+
+	echo "Extensions"
+
+	local n=0
+	for f in $CRYPT_PATH/.extensions/*.bash; do
+		n=$(( n + 1 ))
+		printf "%s [%s]\n" "${f#$CRYPT_PATH/.extensions/}" "$([[ -f "$f.sig" ]] && echo "With signature" || echo "No signature")"
+	done
+
+	printf "\n%s extensions in $PRETTY_PATH/.extensions\n" $n
 }
 
 cmd_init() {
@@ -890,7 +913,7 @@ COMMAND="$1"
 [[ ! -f "$CRYPT_PATH/$CRYPT_ARCHIVE" ]]
 CLOSED=$?
 
-[[ "$COMMAND" == sign || "$COMMAND" == open || "$COMMAND" == init ]] || load_entries "$CRYPT_PATH/.entries"
+[[ "$COMMAND" != sign && "$COMMAND" != init ]] && load_entries "$CRYPT_PATH/.entries" && load_extensions
 
 case "$COMMAND" in
 	help|--help) shift; cmd_help "$@" ;;
