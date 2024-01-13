@@ -461,7 +461,9 @@ _cmd_action_file() {
 		*) error "Unknown action" ;;
 	esac
 
-	eval "$action" "$tmp_file"
+	# Set environment
+	set -- "$tmp_file" "$path" "${entries_name[$entry]}"
+	eval "$action"
 	[[ -f $tmp_file ]] || error "File not saved."
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
