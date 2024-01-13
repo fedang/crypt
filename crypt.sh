@@ -234,6 +234,7 @@ entries_insert=()
 entries_show=()
 entries_edit=()
 entries_color=()
+entries_desc=()
 
 # Unknown entry @unknown
 entries_ext+=( "" )
@@ -242,6 +243,7 @@ entries_insert+=( "none" )
 entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "gray" )
+entries_desc+=( "Unrecognized files" )
 
 # Unencrypted entry
 entries_ext+=( "" )
@@ -250,6 +252,7 @@ entries_insert+=( "none" )
 entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "white,bold" )
+entries_desc+=( "Unencrypted files (invalid!)" )
 
 # Directory entry
 entries_ext+=( "" )
@@ -258,6 +261,7 @@ entries_insert+=( "none" )
 entries_show+=( "none" )
 entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
+entries_desc+=( "Directories" )
 
 # Undefined action
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
@@ -304,6 +308,7 @@ load_entries() {
 		entries_show[$i]="${opts[show_action]}"
 		entries_edit[$i]="${opts[edit_action]}"
 		entries_color[$i]="${opts[color]}"
+		entries_desc[$i]="${opts[description]}"
 
 	done < <(sed "$1" \
 		-e ':a;N;$!ba' \
@@ -357,7 +362,8 @@ confirm_file() {
 
 	while true; do
 		for ((i = 3; i < ${#entries_name[@]}; i++)); do
-			echo "${entries_ext[$i]}) $(_color ${entries_color[$i]})${entries_name[$i]}$(_color reset)" >&2
+			printf "%s) $(_color ${entries_color[$i]})%s$(_color reset)\t\t# %s\n" \
+				"${entries_ext[$i]}" "${entries_name[$i]}" "${entries_desc[$i]:-No description}" >&2
 		done
 		read -r -p "Select one of the valid entries: " ans
 		for ((i = 3; i < ${#entries_name[@]}; i++)); do
@@ -381,6 +387,7 @@ cmd_info() {
 	for ((i = 0; i < ${#entries_name[@]}; i++)); do
 		echo "entry #$i"
 		echo "name: '${entries_name[$i]}'"
+		echo "description: '${entries_desc[$i]}'"
 		echo "extension: '${entries_ext[$i]}'"
 		echo "edit_action: '${entries_edit[$i]}'"
 		echo "show_action: '${entries_show[$i]}'"
@@ -422,8 +429,9 @@ cmd_init() {
 
 		local entries="$CRYPT_PATH/.entries"
 		[[ ! -f "$entries" ]] && \
-		echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color = cyan' > "$entries" && \
-		echo 'extension=pass name=password edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=red' >> "$entries"
+		echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=cyan description="Text file"' > "$entries" && \
+		echo '# You can add whatever entry type you want, also using commands provided by extensions' >> "$entries" && \
+		echo '# Remember to git commit and also sign (if you are using signatures) this file!' >> "$entries"
 
 		git_track "$entries" "Add entries template."
 		gpg_sign "$entries" && git_track "$entries.sig" "Signing entries template with $CRYPT_SIGNING_KEY."
