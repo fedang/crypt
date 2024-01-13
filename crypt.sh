@@ -717,7 +717,7 @@ cmd_sign() {
 
 	local loaded=0 files=()
 	if [[ $# -eq 0 ]]; then
-		[[ $verify -eq 1 ]] || error "Expected file argument"
+		[[ $verify -eq 1 ]] || error "$PROGRAM $COMMAND [--verify|--remove] [files]" Usage
 		readarray -t files < <(find "$CRYPT_PATH/" -path '*/.git' -prune -o -path "$CRYPT_PATH/*.sig" -print)
 	else
 		for path in "$@"; do
@@ -743,28 +743,31 @@ cmd_sign() {
 	fi
 
 	if [[ $verify -eq 1 ]]; then
-		printf "Verifying signatures for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
+		printf "Verifying signature(s) for the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
 		for f in "${files[@]}"; do
-			gpg_verify "${f%.sig}" && echo "$f: $(_color green)Valid$(_color reset)"
+			gpg_verify "${f%.sig}" && echo "${f#$CRYPT_PATH/}: $(_color green)Valid ✔️$(_color reset)"
 		done
 	elif [[ $remove -eq 1 ]]; then
 		for f in "${files[@]}"; do
-			local file="$CRYPT_PATH/${f%.sig}.sig"
+			local file="${f%.sig}.sig"
 			[[ ! -f "$file" ]] && echo "${f%.sig} is not signed!" && continue
 
 			rm -f -v "$file"
 			git_prep "$file"
+
 			if [[ ! -e $file ]]; then
 				git -C "$INNER_GIT_DIR" rm -qr "$file"
 				git_prep "$file"
 				git_commit "Remove $f signature from crypt."
 			fi
-			rmdir -p "${file%/*}" 2>/dev/null
 		done
 	else
 		printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
 		for f in "${files[@]}"; do
+			git_prep "$f.sig"
 			gpg_sign "$f" && echo "$(_color green)$f signed successfully$(_color reset)"
+			git -C "$INNER_GIT_DIR" add "$f" # update file
+			git_track "$f.sig" "Signing \`$f\` with $CRYPT_SIGNING_KEY."
 		done
 	fi
 }
