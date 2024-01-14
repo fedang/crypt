@@ -266,8 +266,8 @@ entries_color+=( "blue,bold" )
 entries_desc+=( "Directories" )
 
 # Basic actions
-function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
-function edit() { $EDITOR $FILE; }
+none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
+edit() { $EDITOR $FILE; }
 
 load_extensions() {
 	[[ -d "$CRYPT_PATH/.extensions" && $CLOSED -eq 0 ]] || return
@@ -486,15 +486,14 @@ _cmd_action_file() {
 		what="Update"
 	fi
 
-	local entry=$(find_entry "$file")
-	local action=none
-
+	local cmd=none entry=$(find_entry "$file")
 	case "$2" in
-		insert) action="${entries_insert[$entry]}" ;;
-		edit) action="${entries_edit[$entry]}" ;;
-		show) action="${entries_show[$entry]}" ;;
+		insert) cmd="${entries_insert[$entry]}" ;;
+		edit) cmd="${entries_edit[$entry]}" ;;
+		show) cmd="${entries_show[$entry]}" ;;
 		*) error "Unknown action" ;;
 	esac
+	cmd="$cmd ${@:3}"
 
 	# Set environment
 	set --
@@ -503,7 +502,7 @@ _cmd_action_file() {
 	ENTRY="${entries_name[$entry]}"
 	ACTION="$2"
 
-	eval "$action"
+	eval "$cmd"
 	[[ -f $tmp_file ]] || error "File not saved."
 	unset -v FILE NAME ENTRY ACTION
 
@@ -519,24 +518,55 @@ _cmd_action_file() {
 
 
 cmd_insert() {
-	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND file" Usage
+	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND file" Usage
 
 	local path="${1%/}"
+	shift
 	check_paths "$path"
 	path=$(confirm_file "$path")
-	_cmd_action_file "$path" insert
+	_cmd_action_file "$path" insert "$@"
 }
 
 cmd_edit() {
-	[[ $# -ne 1 ]] && error "$PROGRAM $COMMAND file" Usage
+	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND file" Usage
 
 	local path="${1%/}"
+	shift
 	check_paths "$path"
 	path=$(check_file "$path")
 	[[ $? -eq 0 ]] || exit 1
 	[[ -z "$path" ]] && error "$1 not found in the crypt"
-	_cmd_action_file "$path" edit
+	_cmd_action_file "$path" edit "$@"
 
+}
+
+cmd_show() {
+	local path="${1%/}"
+	check_paths "$path"
+
+	if [[ -d $CRYPT_PATH/$path ]]; then
+		[[ -z $path ]] && path="$CRYPT_PATH"
+		cmd_list "$path"
+	elif [[ -z "$path" ]]; then
+		error "Try to initialize the crypt."
+	else
+		[[ $CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
+
+		shift
+		path=$(check_file "$path" noask)
+		[[ $? -eq 0 ]] || exit 1
+
+		if [[ -z "$path" ]]; then
+			error "$1 not found in the crypt"
+		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
+			_cmd_action_file "$path" show "$@"
+		elif [[ -f "$CRYPT_PATH/$path" ]]; then
+			#TODO: IS THIS CASE NEEDED?
+			_cmd_action_file "$path" show "$@"
+		else
+			error "Try to initialize the crypt."
+		fi
+	fi
 }
 
 cmd_remove() {
@@ -649,33 +679,6 @@ cmd_git() {
 	make_tmpdir nowarn
 	export TMPDIR="$SECURE_TMPDIR"
 	git -C "$INNER_GIT_DIR" "$@"
-}
-
-cmd_show() {
-	local path="${1%/}"
-	check_paths "$path"
-
-	if [[ -d $CRYPT_PATH/$path ]]; then
-		[[ -z $path ]] && path="$CRYPT_PATH"
-		cmd_list "$path"
-	elif [[ -z "$path" ]]; then
-		error "Try to initialize the crypt."
-	else
-		[[ $CLOSED -eq 1 ]] && error "The crypt must be open to show a file."
-
-		path=$(check_file "$path" noask)
-		[[ $? -eq 0 ]] || exit 1
-
-		if [[ -z "$path" ]]; then
-			error "$1 not found in the crypt"
-		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
-			_cmd_action_file "$path" show
-		elif [[ -f "$CRYPT_PATH/$path" ]]; then
-			_cmd_action_file "$path" show
-		else
-			error "Try to initialize the crypt."
-		fi
-	fi
 }
 
 cmd_copy_move() {
