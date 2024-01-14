@@ -109,12 +109,12 @@ git_track() {
 	[[ -n $INNER_GIT_DIR ]] || error "git repository is missing. Try to reinitialize the crypt."
 	git -C "$INNER_GIT_DIR" add "$1" || return
 	[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$1") ]] || return
-	git_commit "$2"
+	git_commit "$2" "$3"
 }
 
 git_commit() {
 	[[ -n $INNER_GIT_DIR ]] || error "git repository is missing. Try to reinitialize the crypt."
-	git -C "$INNER_GIT_DIR" commit -m "$1"
+	git -C "$INNER_GIT_DIR" commit -m "$1" -m "$2"
 }
 
 git_init() {
@@ -478,7 +478,7 @@ _cmd_action_file() {
 	gpg_recipients "$(dirname -- "$path")"
 
 	make_tmpdir
-	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}"
+	local tmp_file="$(mktemp -u "$SECURE_TMPDIR/XXXXXX")-${path//\//-}.txt"
 
 	local what="Insert"
 	if [[ -f $file && "$2" != insert ]]; then
@@ -496,15 +496,15 @@ _cmd_action_file() {
 	cmd="$cmd ${@:3}"
 
 	# Set environment
-	set --
 	FILE="$tmp_file"
 	NAME="$path"
 	ENTRY="${entries_name[$entry]}"
 	ACTION="$2"
+	MESSAGE="$what $ENTRY entry \`$path\`."
+	set --
 
 	eval "$cmd"
 	[[ -f $tmp_file ]] || error "File not saved."
-	unset -v FILE NAME ENTRY ACTION
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
 	([[ "$2" != edit ]] || echo "File unchanged.") && return
@@ -513,7 +513,8 @@ _cmd_action_file() {
 		confirm "GPG encryption failed. Would you like to try again?"
 	done
 
-	git_track "$file" "$what ${entries_name[$entry]} entry \`$path\`."
+	git_track "$file" "$MESSAGE" "After $ACTION action for $NAME ($ENTRY)."
+	unset -v FILE NAME ENTRY ACTION MESSAGE
 }
 
 
