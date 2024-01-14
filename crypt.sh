@@ -562,9 +562,6 @@ cmd_show() {
 			error "$1 not found in the crypt"
 		elif [[ -f "$CRYPT_PATH/$path.gpg" ]]; then
 			_cmd_action_file "$path" show "$@"
-		elif [[ -f "$CRYPT_PATH/$path" ]]; then
-			#TODO: IS THIS CASE NEEDED?
-			_cmd_action_file "$path" show "$@"
 		else
 			error "Try to initialize the crypt."
 		fi
