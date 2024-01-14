@@ -494,7 +494,7 @@ _cmd_action_file() {
 		show) cmd="${entries_show[$entry]}" ;;
 		*) error "Unknown action" ;;
 	esac
-	cmd="$cmd ${@:3}"
+	cmd+=" ${@:3}"
 
 	# Set environment
 	FILE="$tmp_file"
@@ -583,6 +583,12 @@ cmd_remove() {
 	local path="$1"
 	check_paths "$path"
 
+	if [[ ! -d "$CRYPT_PATH/$path" ]]; then
+		path=$(check_file "$path" noask)
+		[[ $? -eq 0 ]] || exit 1
+		[[ -z "$path" ]] && error "$1 not found in the crypt"
+	fi
+
 	local dir="$CRYPT_PATH/${path%/}"
 	local file="$CRYPT_PATH/$path.gpg"
 
@@ -600,6 +606,66 @@ cmd_remove() {
 		git_commit "Remove $path from crypt."
 	fi
 	rmdir -p "${file%/*}" 2>/dev/null
+}
+
+cmd_copy_move() {
+	[[ $# -ne 2 ]] && error "$PROGRAM $COMMAND old-path new-path" Usage
+	[[ $CLOSED -eq 1 ]] && error "The crypt must be open to $COMMAND a file."
+
+	check_paths "$1" "$2"
+	local old_path="${1%/}"
+
+	if [[ ! -d "$CRYPT_PATH/$old_path" ]]; then
+		old_path=$(check_file "$old_path" noask)
+		[[ $? -eq 0 ]] || exit 1
+		[[ -z "$old_path" ]] && error "$1 not found in the crypt"
+	fi
+	old_path="$CRYPT_PATH/${old_path%.gpg}"
+
+	local ext="${entries_ext[$(find_entry "$old_path")]}"
+	[[ -n $ext ]] && ext=".$ext"
+
+	local old_dir="$old_path"
+	local new_path="$CRYPT_PATH/$2"
+	[[ -d "$new_path" || "$new_path" == *$'/' ]] || new_path="${new_path%$ext}$ext"
+
+	[[ "$new_path" == *.gpg ]] && error "Ambiguous extension for $2"
+
+	if ! [[ -f $old_path.gpg && -d $old_path && $1 == */ || ! -f $old_path.gpg ]]; then
+		old_dir="${old_path%/*}"
+		old_path="${old_path}.gpg"
+	fi
+	[[ -e $old_path ]] || error "$1 is not in the crypt."
+
+	mkdir -p -v "${new_path%/*}"
+	[[ -d $old_path || -d $new_path || $new_path == */ ]] || new_path="${new_path}.gpg"
+
+	local interactive="-i"
+	[[ ! -t 0 ]] && interactive="-f"
+
+	git_prep "$new_path"
+	if [[ $COMMAND == "move" || $COMMAND == "mv" ]]; then
+		mv $interactive -v "$old_path" "$new_path" || exit 1
+		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
+
+		git_prep "$new_path"
+		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
+			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
+			git_prep "$new_path"
+			git_track "$new_path" "Move \`$1\` to \`$2\`."
+		fi
+		git_prep "$old_path"
+		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
+			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
+			git_prep "$old_path"
+			[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$old_path") ]] && git_commit "Remove ${1}."
+		fi
+		rmdir -p "$old_dir" 2>/dev/null
+	elif [[ $COMMAND == "copy" || $COMMAND == "cp" ]]; then
+		cp $interactive -r -v "$old_path" "$new_path" || exit 1
+		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
+		git_track "$new_path" "Copy \`$1\` to \`$2\`."
+	fi
 }
 
 _cmd_list_fmt() {
@@ -680,55 +746,6 @@ cmd_git() {
 	git -C "$INNER_GIT_DIR" "$@"
 }
 
-cmd_copy_move() {
-	[[ $# -ne 2 ]] && error "$PROGRAM $COMMAND old-path new-path" Usage
-	[[ $CLOSED -eq 1 ]] && error "The crypt must be open to $COMMAND a file."
-
-	check_paths "$1" "$2"
-	local old_path="$CRYPT_PATH/${1%/}"
-	old_path="${old_path%.gpg}"
-	local old_dir="$old_path"
-	local new_path="$CRYPT_PATH/$2"
-
-	[[ "$new_path" == *.gpg ]] && error "Ambiguous extension for $2"
-
-	if ! [[ -f $old_path.gpg && -d $old_path && $1 == */ || ! -f $old_path.gpg ]]; then
-		old_dir="${old_path%/*}"
-		old_path="${old_path}.gpg"
-	fi
-	[[ -e $old_path ]] || error "$1 is not in the crypt."
-
-	mkdir -p -v "${new_path%/*}"
-	[[ -d $old_path || -d $new_path || $new_path == */ ]] || new_path="${new_path}.gpg"
-
-	local interactive="-i"
-	[[ ! -t 0 ]] && interactive="-f"
-
-	git_prep "$new_path"
-	if [[ $COMMAND == "move" ]]; then
-		mv $interactive -v "$old_path" "$new_path" || exit 1
-		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
-
-		git_prep "$new_path"
-		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
-			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
-			git_prep "$new_path"
-			git_track "$new_path" "Move \`$1\` to \`$2\`."
-		fi
-		git_prep "$old_path"
-		if [[ -n $INNER_GIT_DIR && ! -e $old_path ]]; then
-			git -C "$INNER_GIT_DIR" rm -qr "$old_path" 2>/dev/null
-			git_prep "$old_path"
-			[[ -n $(git -C "$INNER_GIT_DIR" status --porcelain "$old_path") ]] && git_commit "Remove ${1}."
-		fi
-		rmdir -p "$old_dir" 2>/dev/null
-	else
-		cp $interactive -r -v "$old_path" "$new_path" || exit 1
-		[[ -e "$new_path" ]] && reencrypt_path "$new_path"
-		git_track "$new_path" "Copy \`$1\` to \`$2\`."
-	fi
-}
-
 cmd_grep() {
 	[[ $# -lt 1 ]] && error "$PROGRAM $COMMAND [GREPOPTIONS] search-string" Usage
 	[[ $CLOSED -eq 1 ]] && error "The crypt must be open to use $COMMAND."
@@ -755,7 +772,6 @@ cmd_sign() {
 		--) shift; break ;;
 	esac done
 
-	# TODO: Verify all the signatures in the crypt
 	[[ $verify -eq 1 && $remove -eq 1 ]] && error "$PROGRAM $COMMAND [--verify|--remove] [files]" Usage
 	[[ -n "$CRYPT_SIGNING_KEY" ]] || error "No signing key was specified!"
 	[[ -d "$CRYPT_PATH" ]] || error "Try to initialize the crypt."
