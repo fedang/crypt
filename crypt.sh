@@ -271,6 +271,7 @@ edit() { $EDITOR $FILE; }
 
 load_extensions() {
 	[[ -d "$CRYPT_PATH/.extensions" && $CLOSED -eq 0 ]] || return
+	[[ -n "$CRYPT_LOAD_EXTENSIONS" ]] || return
 
 	for f in $CRYPT_PATH/.extensions/*.bash; do
 		[[ -n "$CRYPT_SIGNING_KEY" ]] && gpg_verify "$f"
@@ -415,7 +416,7 @@ cmd_info() {
 
 	[[ ! -d "$CRYPT_PATH/.extensions" ]] && echo "Extension directory not found ($PRETTY_PATH/.extensions)" && return
 
-	echo "Extensions"
+	printf "Extensions (%s)\n\n" "$([[ -n "$CRYPT_LOAD_EXTENSIONS" ]] && echo "loaded" || echo "not loaded")"
 
 	local n=0
 	for f in $CRYPT_PATH/.extensions/*.bash; do
@@ -914,6 +915,7 @@ cmd_help() {
 
 cmd_version() {
 	echo "crypt v0.1"
+	echo "Made by Federico Angelilli <mail@fedang.net>"
 }
 
 # MAIN
