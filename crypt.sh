@@ -265,8 +265,9 @@ entries_edit+=( "none" )
 entries_color+=( "blue,bold" )
 entries_desc+=( "Directories" )
 
-# Undefined action
+# Basic actions
 function none() { echo "$(_color red,bold)No action specified$(_color reset)"; }
+function edit() { $EDITOR $FILE; }
 
 load_extensions() {
 	[[ -d "$CRYPT_PATH/.extensions" && $CLOSED -eq 0 ]] || return
@@ -452,7 +453,7 @@ cmd_init() {
 
 		local entries="$CRYPT_PATH/.entries"
 		[[ ! -f "$entries" ]] && \
-		echo 'extension=txt name=text edit_action="$EDITOR" insert_action="$EDITOR" show_action="cat" color=cyan description="Text file"' > "$entries" && \
+		echo 'extension=txt name=text edit_action="edit" insert_action="edit" show_action="cat $FILE" color=cyan description="Text file"' > "$entries" && \
 		echo '# You can add whatever entry type you want, also using commands provided by extensions' >> "$entries" && \
 		echo '# Remember to git commit and also sign (if you are using signatures) this file!' >> "$entries"
 
@@ -496,9 +497,15 @@ _cmd_action_file() {
 	esac
 
 	# Set environment
-	set -- "$tmp_file" "$path" "${entries_name[$entry]}"
+	set --
+	FILE="$tmp_file"
+	NAME="$path"
+	ENTRY="${entries_name[$entry]}"
+	ACTION="$2"
+
 	eval "$action"
 	[[ -f $tmp_file ]] || error "File not saved."
+	unset -v FILE NAME ENTRY ACTION
 
 	$GPG -d -o - "${GPG_OPTS[@]}" "$file" 2>/dev/null | diff - "$tmp_file" &>/dev/null && \
 	([[ "$2" != edit ]] || echo "File unchanged.") && return
