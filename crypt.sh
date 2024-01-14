@@ -727,6 +727,8 @@ cmd_list() {
 		tree -f --noreport -l "$path" "${args[@]}" -I '*.sig' | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
+		[[ $CLOSED -eq 1 ]] && return
+
 		local tmp=$(find "$path" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print | \
 			sed -e "s~^$path\/*~~" | sort | while IFS='' read -r line; do \
 			local i=$(find_entry "$line"); echo "${line%.gpg} ${entries_name[$i]} ${line%.${entries_ext[$i]}.gpg}"; done)
@@ -826,9 +828,9 @@ cmd_sign() {
 		printf "Signing with the keys:\n$(_color white,bold)%s$(_color reset)\n\n" "$CRYPT_SIGNING_KEY"
 		for f in "${files[@]}"; do
 			git_prep "$f.sig"
-			gpg_sign "$f" && echo "$(_color green)$f signed successfully$(_color reset)"
+			gpg_sign "$f" && echo "$(_color green)${f#$CRYPT_PATH/} signed successfully$(_color reset)"
 			git -C "$INNER_GIT_DIR" add "$f" # update file
-			git_track "$f.sig" "Signing \`$f\` with $CRYPT_SIGNING_KEY."
+			git_track "$f.sig" "Signing \`${f#$CRYPT_PATH/}\` with $CRYPT_SIGNING_KEY."
 		done
 	fi
 }
