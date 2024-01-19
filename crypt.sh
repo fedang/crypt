@@ -714,7 +714,7 @@ cmd_list() {
 
 	if [ $plain -eq 0 ]; then
 		local header="Crypt ($PRETTY_PATH)"
-		[[ $CLOSED -eq 1 ]] && printf "%s\n%s\n" "$header" "$(_color gray,bold)Closed 🔒$(_color reset)" && return
+		[[ $CLOSED -eq 1 ]] && printf "%s\n%s\n" "$header" "$(_color gray,bold)Closed 🔒$(_color reset)" && exit 1
 
 		if [[ -n "$1" && "$1" != $CRYPT_PATH ]]; then
 			local color="" reset=""
@@ -727,7 +727,7 @@ cmd_list() {
 		tree -f --noreport -l "$path" "${args[@]}" -I '*.sig' | tail -n +2 | while IFS='' read -r line; do _cmd_list_fmt "$line"; done | \
 		column -t -s$'\t' | sed 's/\v/\t\t/' # Make pretty columns
 	else
-		[[ $CLOSED -eq 1 ]] && return
+		[[ $CLOSED -eq 1 ]] && exit 1
 
 		local tmp=$(find "$path" -path '*/.git' -prune -o -path '*/.extensions' -prune -o -iname '*.gpg' -print | \
 			sed -e "s~^$path\/*~~" | sort | while IFS='' read -r line; do \
