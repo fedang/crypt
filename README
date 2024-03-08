@@ -4,3 +4,10 @@ For example, you can have password entries and otp entries, the former being
 copied to your clipboard when selected and the latter generating their code.
 Or you could simply use it as a safe to keep your annotations.
 It is really up to you how you want to configure your crypt.
+
+For guidance on installing crypt see INSTALL.
+
+Crypt is licensed under the GPL-3 (or later). See COPYING.
+
+Crypt was inspired by password-store and started as an overcharged version
+of pass. See CREDITS.
