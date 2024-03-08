@@ -1,11 +1,28 @@
 #!/bin/bash
-
-# The clipboard code was taken from pass
+#
+#    Copyright (C) 2023 Federico Angelilli <mail@fedang.net>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+#    The work that is used or that has inspired this project is credited
+#    in the CREDITS file.
 
 X_SELECTION="${CRYPT_X_SELECTION:-clipboard}"
 CLIP_TIME="${CRYPT_STORE_CLIP_TIME:-45}"
 BASE64="base64"
 
+# This function was adapted from pass
 _clip() {
 	if [[ -n $WAYLAND_DISPLAY ]]; then
 		local copy_cmd=( wl-copy )

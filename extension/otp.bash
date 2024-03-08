@@ -1,7 +1,24 @@
 #!/bin/bash
+#
+#    Copyright (C) 2023 Federico Angelilli <mail@fedang.net>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+#    The work that is used or that has inspired this project is credited
+#    in the CREDITS file.
 
-# The OTP parsing code was taken from pass-otp
-
+# The parsing code was adapted from pass-otp
 _otp_parse() {
 	urldecode() {
 		local url_encoded="${1//+/ }"

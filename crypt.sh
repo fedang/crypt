@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-#    Copyright (C) 2023  Federico Angelilli <mail@fedang.net>
+#    Copyright (C) 2023 Federico Angelilli <mail@fedang.net>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -14,6 +14,9 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+#    The work that is used or that has inspired this project is credited
+#    in the CREDITS file.
 
 umask 077
 set -o pipefail
