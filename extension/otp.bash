@@ -1,3 +1,7 @@
+#!/bin/bash
+
+# The OTP parsing code was taken from pass-otp
+
 _otp_parse() {
 	urldecode() {
 		local url_encoded="${1//+/ }"

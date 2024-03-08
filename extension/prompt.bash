@@ -1,3 +1,5 @@
+#!/bin/bash
+
 single_prompt() {
 	local inp
 	read -r -p "Enter contents of $NAME ($ENTRY): " -e inp
