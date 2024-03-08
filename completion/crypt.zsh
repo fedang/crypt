@@ -3,6 +3,7 @@
 
 # copy to /usr/share/zsh/site-functions/_crypt
 
+# TODO: edit & other actions
 _crypt() {
 	local IFS=$'\n'
 	local location

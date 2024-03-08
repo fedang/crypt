@@ -1,7 +1,17 @@
 To install crypt you can simply rename `crypt.sh` to `crypt` and move it in your path.
-For example by doing
+For example by doing:
+
 	sudo cp crypt.sh /usr/bin/crypt
 
-Similarly, to install the autocomplete scripts you can do something like
-	sudo cp extra/crypt.bash /usr/share/bash-completion/completions/crypt
-	sudo cp extra/crypt.zsh /usr/share/zsh/site-functions/_crypt
+
+Similarly to install cryptmenu (which is a dmenu interface) you can do:
+
+	sudo cp cryptmenu.sh /usr/bin/cryptmenu
+
+Note that cryptmenu requires both dmenu and crypt to work.
+
+
+To install the autocomplete scripts you can do something like:
+
+	sudo cp completion/crypt.bash /usr/share/bash-completion/completions/crypt
+	sudo cp completion/crypt.zsh /usr/share/zsh/site-functions/_crypt

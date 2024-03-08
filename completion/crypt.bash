@@ -2,6 +2,7 @@
 #
 # Copy to /usr/share/bash-completion/completions/crypt
 
+# TODO: edit & other actions
 _crypt() {
 	COMPREPLY=()
 
