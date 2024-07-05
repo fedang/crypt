@@ -956,7 +956,7 @@ case "$COMMAND" in
 	init) shift; cmd_init "$@" ;;
 	info) shift; cmd_info "$@" ;;
 	edit) shift; cmd_edit "$@" ;;
-	insert) shift; cmd_insert "$@" ;;
+	insert|add) shift; cmd_insert "$@" ;;
 	show) shift; cmd_show "$@" ;;
 	grep) shift; cmd_grep "$@" ;;
 	list|ls) shift; cmd_list "$@" ;;
