@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-#    Copyright (C) 2023 Federico Angelilli <mail@fedang.net>
+#    Copyright (C) 2023 Federico Angelilli <code@fedang.net>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -26,6 +26,7 @@ shopt -s nullglob
 
 CRYPT_PATH="${CRYPT_PATH:-~/.crypt}"
 CRYPT_ARCHIVE="${CRYPT_ARCHIVE:-.crypt.tar.gpg}"
+EDITOR="${EDITOR:-vim}"
 
 # UTILITIES
 declare -A _colors=(
@@ -933,7 +934,7 @@ cmd_help() {
 
 cmd_version() {
 	echo "crypt v0.1"
-	echo "Made by Federico Angelilli <mail@fedang.net>"
+	echo "Made by Federico Angelilli <code@fedang.net>"
 }
 
 # MAIN

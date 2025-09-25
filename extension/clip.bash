@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#    Copyright (C) 2023 Federico Angelilli <mail@fedang.net>
+#    Copyright (C) 2023 Federico Angelilli <code@fedang.net>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
